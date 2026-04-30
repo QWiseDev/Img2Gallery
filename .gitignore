@@ -1,0 +1,11 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.pyc
+server/app.db
+server/storage/images/*
+!server/storage/images/.gitkeep
+client/node_modules/
+client/dist/
+
