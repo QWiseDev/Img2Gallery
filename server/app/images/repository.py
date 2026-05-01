@@ -1,4 +1,5 @@
 from app.shared.database import get_db
+from app.shared.time import local_timestamp
 
 
 def serialize_image(row) -> dict:
@@ -50,9 +51,10 @@ def add_image(
         cursor = db.execute(
             """
             INSERT INTO images (
-                user_id, prompt, image_path, task_type, source_image_path, status, error, request_ip, provider_name, model
+                user_id, prompt, image_path, task_type, source_image_path, status, error,
+                request_ip, provider_name, model, queued_at, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -65,6 +67,8 @@ def add_image(
                 request_ip,
                 provider_name,
                 model,
+                local_timestamp(),
+                local_timestamp(),
             ),
         )
         return cursor.lastrowid
@@ -75,10 +79,10 @@ def mark_running(image_id: int, provider_name: str, model: str) -> None:
         db.execute(
             """
             UPDATE images
-            SET status = 'running', provider_name = ?, model = ?, started_at = CURRENT_TIMESTAMP
+            SET status = 'running', provider_name = ?, model = ?, started_at = ?
             WHERE id = ? AND status = 'queued'
             """,
-            (provider_name, model, image_id),
+            (provider_name, model, local_timestamp(), image_id),
         )
 
 
@@ -87,10 +91,10 @@ def mark_ready(image_id: int, image_path: str) -> None:
         db.execute(
             """
             UPDATE images
-            SET status = 'ready', image_path = ?, error = NULL, completed_at = CURRENT_TIMESTAMP
+            SET status = 'ready', image_path = ?, error = NULL, completed_at = ?
             WHERE id = ?
             """,
-            (image_path, image_id),
+            (image_path, local_timestamp(), image_id),
         )
 
 
@@ -99,10 +103,10 @@ def mark_failed(image_id: int, error: str) -> None:
         db.execute(
             """
             UPDATE images
-            SET status = 'failed', error = ?, completed_at = CURRENT_TIMESTAMP
+            SET status = 'failed', error = ?, completed_at = ?
             WHERE id = ?
             """,
-            (error, image_id),
+            (error, local_timestamp(), image_id),
         )
 
 

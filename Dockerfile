@@ -13,7 +13,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/server \
     DATABASE_PATH=/data/app.db \
     IMAGE_STORAGE_DIR=/data/images \
-    CLIENT_ORIGIN=http://localhost:8000
+    CLIENT_ORIGIN=http://localhost:8000 \
+    TZ=Asia/Shanghai \
+    APP_TIMEZONE=Asia/Shanghai
 
 WORKDIR /app
 

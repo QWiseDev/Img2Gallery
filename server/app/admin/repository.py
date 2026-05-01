@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.shared.config import get_settings
 from app.shared.database import get_db
+from app.shared.time import local_timestamp
 
 
 def get_setting(key: str, default: str) -> str:
@@ -15,10 +16,10 @@ def set_setting(key: str, value: str) -> None:
         db.execute(
             """
             INSERT INTO app_settings (key, value, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
             """,
-            (key, value),
+            (key, value, local_timestamp()),
         )
 
 
@@ -81,7 +82,7 @@ def upsert_provider(payload: dict) -> dict:
                 """
                 UPDATE model_providers
                 SET name = ?, provider_type = ?, model = ?, api_base = ?, api_key = ?,
-                    enabled = ?, is_default = ?, updated_at = CURRENT_TIMESTAMP
+                    enabled = ?, is_default = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -92,6 +93,7 @@ def upsert_provider(payload: dict) -> dict:
                     api_key or "",
                     int(payload["enabled"]),
                     int(payload["is_default"]),
+                    local_timestamp(),
                     payload["id"],
                 ),
             )
@@ -100,9 +102,10 @@ def upsert_provider(payload: dict) -> dict:
             cursor = db.execute(
                 """
                 INSERT INTO model_providers (
-                    name, provider_type, model, api_base, api_key, enabled, is_default
+                    name, provider_type, model, api_base, api_key, enabled, is_default,
+                    created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["name"],
@@ -112,6 +115,8 @@ def upsert_provider(payload: dict) -> dict:
                     api_key or "",
                     int(payload["enabled"]),
                     int(payload["is_default"]),
+                    local_timestamp(),
+                    local_timestamp(),
                 ),
             )
             provider_id = cursor.lastrowid

@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from .config import get_settings
+from .time import local_timestamp
 
 
 def connect() -> sqlite3.Connection:
@@ -179,15 +180,17 @@ def migrate_images_status(db: sqlite3.Connection) -> None:
 def seed_defaults(db: sqlite3.Connection) -> None:
     db.execute(
         """
-        INSERT OR IGNORE INTO app_settings (key, value)
-        VALUES ('generation_concurrency', '1')
-        """
+        INSERT OR IGNORE INTO app_settings (key, value, updated_at)
+        VALUES ('generation_concurrency', '1', ?)
+        """,
+        (local_timestamp(),),
     )
     db.execute(
         """
         INSERT OR IGNORE INTO model_providers (
-            name, provider_type, model, api_base, api_key, enabled, is_default
+            name, provider_type, model, api_base, api_key, enabled, is_default, created_at, updated_at
         )
-        VALUES ('GPT Image 2', 'openai_compatible', 'gpt-image-2', '', '', 1, 1)
-        """
+        VALUES ('GPT Image 2', 'openai_compatible', 'gpt-image-2', '', '', 1, 1, ?, ?)
+        """,
+        (local_timestamp(), local_timestamp()),
     )

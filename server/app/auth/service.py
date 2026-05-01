@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, Request, Response, status
 
 from app.shared.database import get_db
+from app.shared.time import local_timestamp
 
 SESSION_COOKIE = "gallery_session"
 SESSION_DAYS = 14
@@ -43,10 +44,10 @@ def create_user(username: str, password: str, display_name: str | None) -> dict:
         with get_db() as db:
             cursor = db.execute(
                 """
-                INSERT INTO users (username, display_name, password_hash, avatar_color)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO users (username, display_name, password_hash, avatar_color, created_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (normalized, shown_name, hash_password(password), color),
+                (normalized, shown_name, hash_password(password), color, local_timestamp()),
             )
             row = db.execute("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,)).fetchone()
     except Exception as exc:
@@ -71,10 +72,10 @@ def record_login(user_id: int, ip_address: str | None) -> None:
         db.execute(
             """
             UPDATE users
-            SET last_login_ip = ?, last_login_at = CURRENT_TIMESTAMP
+            SET last_login_ip = ?, last_login_at = ?
             WHERE id = ?
             """,
-            (ip_address, user_id),
+            (ip_address, local_timestamp(), user_id),
         )
 
 

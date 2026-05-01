@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     database_path: str = "server/app.db"
     image_storage_dir: str = "server/storage/images"
     client_origin: str = "http://localhost:5173"
+    app_timezone: str = "Asia/Shanghai"
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
