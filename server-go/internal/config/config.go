@@ -56,7 +56,8 @@ func projectRoot() string {
 		return "."
 	}
 	for {
-		if fileExists(filepath.Join(wd, "client", "package.json")) {
+		if fileExists(filepath.Join(wd, "client", "package.json")) ||
+			fileExists(filepath.Join(wd, "client", "dist", "index.html")) {
 			return wd
 		}
 		next := filepath.Dir(wd)
