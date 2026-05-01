@@ -11,6 +11,7 @@ import (
 	"github.com/QWiseDev/Img2Gallery/server-go/internal/config"
 	"github.com/QWiseDev/Img2Gallery/server-go/internal/db"
 	"github.com/QWiseDev/Img2Gallery/server-go/internal/httpx"
+	"github.com/QWiseDev/Img2Gallery/server-go/internal/images"
 )
 
 func New(cfg config.Config) (http.Handler, *sql.DB, error) {
@@ -28,9 +29,13 @@ func New(cfg config.Config) (http.Handler, *sql.DB, error) {
 	})
 	authService := auth.NewService(database, cfg)
 	authHandlers := auth.NewHandlers(authService, auth.NewCaptchaStore())
+	imagesRepo := images.NewRepository(database, cfg)
+	imageQueue := images.NewQueue(imagesRepo, images.NewProviderClient(cfg))
+	imageQueue.Start()
 	adminService := admin.NewService(database, cfg, authService)
 	adminHandlers := admin.NewHandlers(adminService, admin.NewRepository(database, cfg))
 	authHandlers.Register(mux)
+	images.NewHandlers(imagesRepo, authHandlers, cfg, imageQueue).Register(mux)
 	adminHandlers.Register(mux)
 	return withCORS(mux, cfg), database, nil
 }
