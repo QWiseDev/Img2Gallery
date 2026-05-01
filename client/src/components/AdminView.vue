@@ -36,11 +36,12 @@ function defaultProvider() {
 async function bootstrap() {
   try {
     await api.adminMe()
-    authed.value = true
     await loadAdminData()
+    authed.value = true
     startAutoRefresh()
-  } catch {
+  } catch (error) {
     authed.value = false
+    message.value = error.message === '请先登录管理员' ? '' : error.message
   } finally {
     loading.value = false
   }
@@ -48,14 +49,18 @@ async function bootstrap() {
 
 async function login() {
   message.value = ''
+  saving.value = true
   try {
     await api.adminLogin({ password: password.value })
-    authed.value = true
     password.value = ''
     await loadAdminData()
+    authed.value = true
     startAutoRefresh()
   } catch (error) {
+    authed.value = false
     message.value = error.message
+  } finally {
+    saving.value = false
   }
 }
 
@@ -180,17 +185,17 @@ function shortPrompt(text) {
         <ShieldCheck :size="32" />
         <div>
           <h1>管理后台</h1>
-          <p>输入管理员密码查看系统与用户使用情况。</p>
+          <p>普通账号登录状态下，仍需输入管理员密码或使用管理员账号进入。</p>
         </div>
       </div>
       <form class="auth-form" @submit.prevent="login">
         <label>管理员密码<input v-model="password" type="password" autocomplete="current-password" required /></label>
-        <button class="primary-button wide"><ShieldCheck :size="18" /> 进入后台</button>
+        <button class="primary-button wide" :disabled="saving"><ShieldCheck :size="18" /> {{ saving ? '正在进入' : '进入后台' }}</button>
       </form>
       <p v-if="message" class="message">{{ message }}</p>
     </section>
 
-    <template v-else>
+    <template v-else-if="dashboard">
       <header class="admin-header">
         <div>
           <span class="kicker">Admin Console</span>
@@ -296,5 +301,16 @@ function shortPrompt(text) {
         </div>
       </section>
     </template>
+
+    <section v-else class="admin-card admin-login-card">
+      <div class="admin-brand">
+        <ShieldCheck :size="32" />
+        <div>
+          <h1>管理后台</h1>
+          <p>{{ message || '管理数据加载失败，请重新登录。' }}</p>
+        </div>
+      </div>
+      <button class="primary-button wide" @click="authed = false">重新登录</button>
+    </section>
   </main>
 </template>
