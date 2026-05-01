@@ -84,6 +84,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```bash
 cd client
 npm install
+cp .env.example .env
 npm run dev
 ```
 
@@ -92,6 +93,8 @@ npm run dev
 ```text
 http://127.0.0.1:5173
 ```
+
+Docker 镜像内前端默认使用同源 API，也就是访问 `http://服务器IP:8000` 时会请求同一个域名下的 `/api/...`，不需要额外配置 `VITE_API_BASE`。
 
 ## 管理后台
 
