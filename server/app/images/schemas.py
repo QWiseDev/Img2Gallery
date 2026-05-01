@@ -9,6 +9,8 @@ class ImageOut(BaseModel):
     id: int
     prompt: str
     image_url: str | None
+    task_type: str = "generate"
+    source_image_url: str | None = None
     status: str
     error: str | None
     request_ip: str | None

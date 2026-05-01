@@ -359,6 +359,97 @@ h2 {
   background: #f1f5f9;
 }
 
+.mode-switch {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+}
+
+.mode-switch button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+  padding: 0 14px;
+}
+
+.mode-switch .active {
+  background: white;
+  color: #ea580c;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+}
+
+.upload-box {
+  min-height: 190px;
+  margin-top: 26px;
+  border: 1px dashed #f59e0b;
+  border-radius: 20px;
+  background: #fff7ed;
+  color: #c2410c;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  overflow: hidden;
+  position: relative;
+  text-align: center;
+}
+
+.upload-box input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upload-box strong {
+  color: #9a3412;
+  font-size: 18px;
+}
+
+.upload-box small {
+  color: #9a6a40;
+  font-weight: 700;
+}
+
+.upload-box.filled {
+  min-height: 260px;
+  border-style: solid;
+  background: #f8fafc;
+}
+
+.upload-box.filled img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #111827;
+}
+
+.upload-box.filled span {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: white;
+  font-weight: 800;
+  padding: 8px 12px;
+}
+
+.clear-upload {
+  width: auto;
+  margin: 12px 0 -4px;
+  padding: 0 16px;
+}
+
 .auth-tabs button {
   min-height: 40px;
   background: transparent;
@@ -562,6 +653,19 @@ h2 {
   transition: opacity 0.2s, transform 0.2s;
 }
 
+.task-badge {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  z-index: 1;
+  border-radius: 999px;
+  background: rgba(255, 247, 237, 0.94);
+  color: #c2410c;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 7px 11px;
+}
+
 .preview-trigger:hover .preview-hint,
 .preview-trigger:focus-visible .preview-hint {
   opacity: 1;
@@ -682,6 +786,20 @@ h2 {
   gap: 14px;
 }
 
+.records-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.collapse-toggle svg {
+  transition: transform 0.18s;
+}
+
+.collapse-toggle.active svg {
+  transform: rotate(180deg);
+}
+
 .record-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -691,6 +809,26 @@ h2 {
   border-radius: 18px;
   background: rgba(248, 250, 252, 0.82);
   padding: 16px;
+}
+
+.record-row.has-source {
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+}
+
+.record-source {
+  width: 72px;
+  height: 72px;
+  border: 0;
+  border-radius: 16px;
+  background: #111827;
+  overflow: hidden;
+  padding: 0;
+}
+
+.record-source img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .record-row p {
@@ -714,6 +852,24 @@ h2 {
 .record-row em {
   color: #be123c;
   margin-top: 6px;
+}
+
+.records-more {
+  justify-self: center;
+  margin-top: 6px;
+}
+
+.load-more-state {
+  min-height: 58px;
+  display: grid;
+  place-items: center;
+  color: #8a9ab2;
+  font-weight: 800;
+  padding-top: 18px;
+}
+
+.load-more-state .ghost-button {
+  margin: 0;
 }
 
 .preview-modal {
@@ -792,6 +948,26 @@ h2 {
   line-height: 1.8;
   max-height: 150px;
   overflow: auto;
+}
+
+.source-preview-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -4px 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.76);
+  font-weight: 800;
+  padding: 10px;
+}
+
+.source-preview-line img {
+  width: 58px;
+  height: 58px;
+  border-radius: 12px;
+  object-fit: cover;
 }
 
 .preview-meta,
@@ -923,6 +1099,10 @@ h2 {
   min-width: 120px;
   margin-top: 0;
   padding: 0 18px;
+}
+
+.ghost-button.clear-upload {
+  margin: 12px 0 -4px;
 }
 
 .admin-stats,
@@ -1222,13 +1402,54 @@ h2 {
     justify-content: stretch;
   }
 
+  .mode-switch {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .mode-switch button {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .upload-box {
+    min-height: 150px;
+  }
+
+  .upload-box.filled {
+    min-height: 210px;
+  }
+
   .segmented button {
     flex: 1;
     padding: 0 8px;
   }
 
+  .records-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .records-actions .ghost-button {
+    width: 100%;
+  }
+
   .record-row {
     grid-template-columns: 1fr;
+  }
+
+  .record-row.has-source {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .record-row.has-source .tiny-button {
+    grid-column: 1 / -1;
+  }
+
+  .record-source {
+    width: 64px;
+    height: 64px;
   }
 
   .preview-hint {

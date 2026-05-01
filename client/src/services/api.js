@@ -1,10 +1,11 @@
 const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? 'http://127.0.0.1:8000' : '')
 
 async function request(path, options = {}) {
+  const isFormData = options.body instanceof FormData
   const response = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(options.headers || {}),
     },
     ...options,
@@ -26,9 +27,19 @@ export const api = {
   login: (payload) => request('/api/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
   register: (payload) => request('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
   logout: () => request('/api/auth/logout', { method: 'POST', body: JSON.stringify({}) }),
-  images: (sort) => request(`/api/images?sort=${encodeURIComponent(sort)}`),
-  myImages: () => request('/api/images/mine'),
+  images: (sort, offset = 0, limit = 24) =>
+    request(
+      `/api/images?sort=${encodeURIComponent(sort)}&offset=${encodeURIComponent(offset)}&limit=${encodeURIComponent(limit)}`,
+    ),
+  myImages: (offset = 0, limit = 12) =>
+    request(`/api/images/mine?offset=${encodeURIComponent(offset)}&limit=${encodeURIComponent(limit)}`),
   createImage: (prompt) => request('/api/images', { method: 'POST', body: JSON.stringify({ prompt }) }),
+  editImage: (prompt, image) => {
+    const form = new FormData()
+    form.append('prompt', prompt)
+    form.append('image', image)
+    return request('/api/images/edit', { method: 'POST', body: form })
+  },
   jobEventsUrl: (id) => `${API_BASE}/api/images/${id}/events`,
   like: (id) => request(`/api/images/${id}/like`, { method: 'POST', body: JSON.stringify({}) }),
   favorite: (id) => request(`/api/images/${id}/favorite`, { method: 'POST', body: JSON.stringify({}) }),

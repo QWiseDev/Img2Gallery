@@ -55,6 +55,8 @@ def init_db() -> None:
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 prompt TEXT NOT NULL,
                 image_path TEXT,
+                task_type TEXT NOT NULL DEFAULT 'generate',
+                source_image_path TEXT,
                 status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'ready', 'failed')),
                 error TEXT,
                 request_ip TEXT,
@@ -119,6 +121,8 @@ def migrate_schema(db: sqlite3.Connection) -> None:
         "request_ip": "TEXT",
         "provider_name": "TEXT",
         "model": "TEXT",
+        "task_type": "TEXT NOT NULL DEFAULT 'generate'",
+        "source_image_path": "TEXT",
         "queued_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
         "started_at": "TEXT",
         "completed_at": "TEXT",
@@ -147,6 +151,8 @@ def migrate_images_status(db: sqlite3.Connection) -> None:
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             prompt TEXT NOT NULL,
             image_path TEXT,
+            task_type TEXT NOT NULL DEFAULT 'generate',
+            source_image_path TEXT,
             status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'ready', 'failed')),
             error TEXT,
             request_ip TEXT,
@@ -158,9 +164,9 @@ def migrate_images_status(db: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         INSERT INTO images (
-            id, user_id, prompt, image_path, status, error, created_at, queued_at, completed_at
+            id, user_id, prompt, image_path, task_type, source_image_path, status, error, created_at, queued_at, completed_at
         )
-        SELECT id, user_id, prompt, image_path, status, error, created_at, created_at, created_at
+        SELECT id, user_id, prompt, image_path, 'generate', NULL, status, error, created_at, created_at, created_at
         FROM images_old;
         DROP TABLE images_old;
         """

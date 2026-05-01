@@ -166,6 +166,8 @@ def generation_records(limit: int = 120) -> list[dict]:
             SELECT
                 images.id,
                 images.image_path,
+                images.task_type,
+                images.source_image_path,
                 images.prompt,
                 images.status,
                 images.error,
@@ -191,16 +193,27 @@ def generation_records(limit: int = 120) -> list[dict]:
 def delete_generation(image_id: int) -> dict | None:
     settings = get_settings()
     with get_db() as db:
-        row = db.execute("SELECT id, image_path FROM images WHERE id = ?", (image_id,)).fetchone()
+        row = db.execute(
+            "SELECT id, image_path, source_image_path FROM images WHERE id = ?",
+            (image_id,),
+        ).fetchone()
         if not row:
             return None
         db.execute("DELETE FROM images WHERE id = ?", (image_id,))
-    image_path = row["image_path"]
-    if image_path:
-        path = settings.storage_dir / Path(image_path).name
-        if path.exists() and path.is_file():
-            path.unlink()
+    delete_storage_file(settings.storage_dir, row["image_path"])
+    delete_storage_file(settings.storage_dir, row["source_image_path"])
     return {"id": image_id}
+
+
+def delete_storage_file(storage_dir: Path, relative_path: str | None) -> None:
+    if not relative_path:
+        return
+    root = storage_dir.resolve()
+    path = (storage_dir / relative_path).resolve()
+    if root != path and root not in path.parents:
+        return
+    if path.exists() and path.is_file():
+        path.unlink()
 
 
 def dashboard() -> dict:

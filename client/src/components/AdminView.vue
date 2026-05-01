@@ -276,10 +276,11 @@ function shortPrompt(text) {
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th>ID</th><th>用户</th><th>状态</th><th>IP</th><th>模型</th><th>提示词</th><th>完成时间</th><th>操作</th></tr></thead>
+            <thead><tr><th>ID</th><th>类型</th><th>用户</th><th>状态</th><th>IP</th><th>模型</th><th>提示词</th><th>完成时间</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="item in generations" :key="item.id">
                 <td>{{ item.id }}</td>
+                <td>{{ item.task_type === 'edit' ? '编辑' : '生成' }}</td>
                 <td>{{ item.display_name }}<br /><span>@{{ item.username }}</span></td>
                 <td>{{ item.status }}</td>
                 <td>{{ item.request_ip || '-' }}</td>

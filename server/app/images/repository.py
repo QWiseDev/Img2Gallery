@@ -3,10 +3,14 @@ from app.shared.database import get_db
 
 def serialize_image(row) -> dict:
     image_path = row["image_path"]
+    source_image_path = row["source_image_path"]
     return {
         "id": row["id"],
         "prompt": row["prompt"],
         "image_url": f"/media/{image_path}" if image_path else None,
+        "task_type": row["task_type"],
+        "source_image_path": source_image_path,
+        "source_image_url": f"/media/{source_image_path}" if source_image_path else None,
         "status": row["status"],
         "error": row["error"],
         "request_ip": row["request_ip"],
@@ -38,16 +42,29 @@ def add_image(
     error: str | None = None,
     provider_name: str | None = None,
     model: str | None = None,
+    task_type: str = "generate",
+    source_image_path: str | None = None,
 ):
     with get_db() as db:
         cursor = db.execute(
             """
             INSERT INTO images (
-                user_id, prompt, image_path, status, error, request_ip, provider_name, model
+                user_id, prompt, image_path, task_type, source_image_path, status, error, request_ip, provider_name, model
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, prompt, image_path, status, error, request_ip, provider_name, model),
+            (
+                user_id,
+                prompt,
+                image_path,
+                task_type,
+                source_image_path,
+                status,
+                error,
+                request_ip,
+                provider_name,
+                model,
+            ),
         )
         return cursor.lastrowid
 
@@ -145,7 +162,7 @@ def queue_position(image_id: int) -> int | None:
     return position["position"]
 
 
-def list_images(viewer_id: int | None, sort: str) -> list[dict]:
+def list_images(viewer_id: int | None, sort: str, limit: int, offset: int) -> list[dict]:
     order = "likes DESC, images.created_at DESC" if sort == "popular" else "images.created_at DESC"
     favorite_filter = ""
     params: list[int] = [viewer_id or 0, viewer_id or 0]
@@ -177,14 +194,14 @@ def list_images(viewer_id: int | None, sort: str) -> list[dict]:
             {favorite_filter}
             GROUP BY images.id
             ORDER BY {order}
-            LIMIT 80
+            LIMIT ? OFFSET ?
             """,
-            params,
+            [*params, limit, offset],
         ).fetchall()
     return [serialize_image(row) for row in rows]
 
 
-def list_user_images(user_id: int) -> list[dict]:
+def list_user_images(user_id: int, limit: int, offset: int) -> list[dict]:
     with get_db() as db:
         rows = db.execute(
             """
@@ -210,9 +227,9 @@ def list_user_images(user_id: int) -> list[dict]:
             WHERE images.user_id = ?
             GROUP BY images.id
             ORDER BY images.id DESC
-            LIMIT 120
+            LIMIT ? OFFSET ?
             """,
-            (user_id, user_id, user_id),
+            (user_id, user_id, user_id, limit, offset),
         ).fetchall()
     return [serialize_image(row) for row in rows]
 

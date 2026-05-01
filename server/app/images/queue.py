@@ -4,7 +4,7 @@ import json
 
 from app.admin.repository import active_provider, get_concurrency
 
-from .generator import ImageGenerationError, generate_and_store
+from .generator import ImageGenerationError, edit_and_store, generate_and_store
 from .repository import (
     get_image,
     mark_failed,
@@ -70,10 +70,11 @@ async def process_job(image_id: int) -> None:
     if not image:
         return
     try:
-        image_path = await asyncio.wait_for(
-            generate_and_store(image["prompt"], provider),
-            timeout=JOB_TIMEOUT_SECONDS,
-        )
+        if image.get("task_type") == "edit":
+            job = edit_and_store(image["prompt"], image.get("source_image_path"), provider)
+        else:
+            job = generate_and_store(image["prompt"], provider)
+        image_path = await asyncio.wait_for(job, timeout=JOB_TIMEOUT_SECONDS)
         mark_ready(image_id, image_path)
     except TimeoutError:
         mark_failed(image_id, f"生成接口超时（超过 {JOB_TIMEOUT_SECONDS} 秒）")
@@ -92,11 +93,12 @@ async def job_events(image_id: int, viewer_id: int):
         if not image:
             yield sse({"status": "missing", "position": None, "queue": queue_counts()})
             return
+        public_image = {key: value for key, value in image.items() if key != "source_image_path"}
         payload = {
             "status": image["status"],
             "position": queue_position(image_id),
             "queue": queue_counts(),
-            "image": image,
+            "image": public_image,
         }
         yield sse(payload)
         if image["status"] in {"ready", "failed"}:

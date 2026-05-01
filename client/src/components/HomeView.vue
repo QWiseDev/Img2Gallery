@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   Bookmark,
   Check,
+  ChevronDown,
   Copy,
   ExternalLink,
   Heart,
@@ -10,22 +11,37 @@ import {
   LogOut,
   RefreshCw,
   Sparkles,
+  Trash2,
+  UploadCloud,
   UserRound,
   WandSparkles,
   X,
 } from 'lucide-vue-next'
 import { api, mediaUrl } from '../services/api'
 
+const GALLERY_PAGE_SIZE = 24
+const RECORD_PAGE_SIZE = 8
 const user = ref(null)
 const authMode = ref('login')
 const authForm = ref({ username: '', password: '', display_name: '', captcha_code: '' })
 const authModalOpen = ref(false)
 const captcha = ref(null)
 const prompt = ref('')
+const createMode = ref('generate')
+const sourceFile = ref(null)
+const sourcePreview = ref('')
 const images = ref([])
 const myImages = ref([])
 const sort = ref('latest')
 const loading = ref(true)
+const galleryLoadingMore = ref(false)
+const galleryHasMore = ref(true)
+const galleryOffset = ref(0)
+const recordsOpen = ref(false)
+const recordsLoaded = ref(false)
+const recordsLoading = ref(false)
+const recordsHasMore = ref(true)
+const recordsOffset = ref(0)
 const authLoading = ref(false)
 const generating = ref(false)
 const message = ref('')
@@ -34,6 +50,7 @@ const previewImage = ref(null)
 const copiedPromptId = ref(null)
 let eventSource = null
 let copyResetTimer = null
+let previewObjectUrl = ''
 
 const stats = computed(() => {
   const ready = images.value.filter((item) => item.status === 'ready').length
@@ -51,11 +68,14 @@ const sortedLabel = computed(() => {
 onMounted(() => {
   bootstrap()
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('scroll', handleGalleryScroll, { passive: true })
 })
 onBeforeUnmount(() => {
   closeEvents()
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('scroll', handleGalleryScroll)
   if (copyResetTimer) clearTimeout(copyResetTimer)
+  clearSourceImage()
 })
 
 async function bootstrap() {
@@ -65,28 +85,55 @@ async function bootstrap() {
   } catch {
     user.value = null
   }
-  await loadImages()
-  if (user.value) await loadMyImages()
+  await loadImages(true)
   loading.value = false
 }
 
-async function loadImages() {
+async function loadImages(reset = false) {
+  if (!reset && (galleryLoadingMore.value || !galleryHasMore.value || loading.value)) return
+  if (reset) {
+    loading.value = true
+    galleryOffset.value = 0
+    galleryHasMore.value = true
+  } else {
+    galleryLoadingMore.value = true
+  }
   try {
-    images.value = await api.images(sort.value)
+    const offset = reset ? 0 : galleryOffset.value
+    const rows = await api.images(sort.value, offset, GALLERY_PAGE_SIZE)
+    images.value = reset ? rows : mergeImages(images.value, rows)
+    galleryOffset.value = offset + rows.length
+    galleryHasMore.value = rows.length === GALLERY_PAGE_SIZE
   } catch (error) {
     message.value = error.message
+  } finally {
+    if (reset) loading.value = false
+    else galleryLoadingMore.value = false
   }
 }
 
-async function loadMyImages() {
+async function loadMyImages(reset = false) {
   if (!user.value) {
     myImages.value = []
     return
   }
+  if (!reset && (recordsLoading.value || !recordsHasMore.value)) return
+  if (reset) {
+    recordsOffset.value = 0
+    recordsHasMore.value = true
+  }
+  recordsLoading.value = true
   try {
-    myImages.value = await api.myImages()
+    const offset = reset ? 0 : recordsOffset.value
+    const rows = await api.myImages(offset, RECORD_PAGE_SIZE)
+    myImages.value = reset ? rows : mergeImages(myImages.value, rows)
+    recordsOffset.value = offset + rows.length
+    recordsHasMore.value = rows.length === RECORD_PAGE_SIZE
+    recordsLoaded.value = true
   } catch (error) {
     message.value = error.message
+  } finally {
+    recordsLoading.value = false
   }
 }
 
@@ -101,8 +148,10 @@ async function submitAuth() {
     user.value = authMode.value === 'login' ? await api.login(payload) : await api.register(payload)
     authForm.value = { username: '', password: '', display_name: '', captcha_code: '' }
     authModalOpen.value = false
-    await loadImages()
-    await loadMyImages()
+    recordsOpen.value = false
+    recordsLoaded.value = false
+    myImages.value = []
+    await loadImages(true)
   } catch (error) {
     message.value = error.message
     authForm.value.captcha_code = ''
@@ -119,10 +168,14 @@ async function logout() {
   sort.value = 'latest'
   queueState.value = null
   myImages.value = []
-  await loadImages()
+  recordsOpen.value = false
+  recordsLoaded.value = false
+  recordsOffset.value = 0
+  recordsHasMore.value = true
+  await loadImages(true)
 }
 
-async function generateImage() {
+async function submitImageJob() {
   if (!user.value) {
     message.value = '请先登录后再提交提示词'
     openAuthModal('login')
@@ -132,17 +185,60 @@ async function generateImage() {
     message.value = '提示词至少需要 2 个字符'
     return
   }
+  if (createMode.value === 'edit' && !sourceFile.value) {
+    message.value = '请先上传需要编辑的图片'
+    return
+  }
   generating.value = true
   message.value = ''
   try {
-    const created = await api.createImage(prompt.value.trim())
+    const cleanPrompt = prompt.value.trim()
+    const created =
+      createMode.value === 'edit'
+        ? await api.editImage(cleanPrompt, sourceFile.value)
+        : await api.createImage(cleanPrompt)
     images.value = [created, ...images.value.filter((item) => item.id !== created.id)]
     myImages.value = [created, ...myImages.value.filter((item) => item.id !== created.id)]
     prompt.value = ''
+    if (createMode.value === 'edit') clearSourceImage()
     watchJob(created.id)
   } catch (error) {
     message.value = error.message
     generating.value = false
+  }
+}
+
+function setCreateMode(mode) {
+  if (generating.value) return
+  createMode.value = mode
+  message.value = ''
+}
+
+function handleSourceFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    message.value = '仅支持 PNG、JPG、WEBP 图片'
+    return
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    message.value = '上传图片不能超过 10MB'
+    return
+  }
+  clearSourceImage()
+  sourceFile.value = file
+  previewObjectUrl = URL.createObjectURL(file)
+  sourcePreview.value = previewObjectUrl
+  message.value = ''
+}
+
+function clearSourceImage() {
+  sourceFile.value = null
+  sourcePreview.value = ''
+  if (previewObjectUrl) {
+    URL.revokeObjectURL(previewObjectUrl)
+    previewObjectUrl = ''
   }
 }
 
@@ -156,8 +252,8 @@ function watchJob(id) {
     if (['ready', 'failed'].includes(payload.status)) {
       generating.value = false
       closeEvents()
-      await loadImages()
-      await loadMyImages()
+      await loadImages(true)
+      if (recordsLoaded.value) await loadMyImages(true)
     }
   }
   eventSource.onerror = () => {
@@ -176,7 +272,23 @@ function closeEvents() {
 
 async function setSort(nextSort) {
   sort.value = nextSort
-  await loadImages()
+  await loadImages(true)
+}
+
+function handleGalleryScroll() {
+  const documentHeight = document.documentElement.scrollHeight
+  const currentBottom = window.scrollY + window.innerHeight
+  if (documentHeight - currentBottom < 700) loadImages(false)
+}
+
+async function toggleRecords() {
+  recordsOpen.value = !recordsOpen.value
+  if (recordsOpen.value && !recordsLoaded.value) await loadMyImages(true)
+}
+
+function mergeImages(current, nextRows) {
+  const seen = new Set(current.map((item) => item.id))
+  return [...current, ...nextRows.filter((item) => !seen.has(item.id))]
 }
 
 async function openAuthModal(mode = 'login') {
@@ -276,10 +388,11 @@ function replaceImage(updated) {
 
 function queueText() {
   if (!queueState.value) return ''
+  const action = queueState.value.image?.task_type === 'edit' ? '编辑' : '生成'
   if (queueState.value.status === 'queued') return `排队中，当前第 ${queueState.value.position} 位`
-  if (queueState.value.status === 'running') return '正在生成，请保持页面打开'
-  if (queueState.value.status === 'ready') return '生成完成，已加入画廊'
-  if (queueState.value.status === 'failed') return queueState.value.image?.error || '生成失败'
+  if (queueState.value.status === 'running') return `正在${action}，请保持页面打开`
+  if (queueState.value.status === 'ready') return `${action}完成，已加入画廊`
+  if (queueState.value.status === 'failed') return queueState.value.image?.error || `${action}失败`
   return ''
 }
 
@@ -294,6 +407,10 @@ function timeOnly(value) {
 function statusLabel(status) {
   const labels = { queued: '排队中', running: '生成中', ready: '已完成', failed: '失败' }
   return labels[status] || status
+}
+
+function taskLabel(taskType) {
+  return taskType === 'edit' ? '编辑' : '生成'
 }
 </script>
 
@@ -312,9 +429,9 @@ function statusLabel(status) {
           <span class="pill success"><span></span> API 就绪</span>
         </div>
         <div class="stat-grid">
-          <div><small>本地作品</small><strong>{{ images.length }}</strong></div>
-          <div><small>成功生成</small><strong>{{ stats.ready }}</strong></div>
-          <div><small>累计点赞</small><strong>{{ stats.likes }}</strong></div>
+          <div><small>已加载作品</small><strong>{{ images.length }}</strong></div>
+          <div><small>已加载完成</small><strong>{{ stats.ready }}</strong></div>
+          <div><small>已加载点赞</small><strong>{{ stats.likes }}</strong></div>
           <div><small>当前身份</small><strong class="identity">{{ currentName }}</strong></div>
         </div>
       </aside>
@@ -324,19 +441,45 @@ function statusLabel(status) {
       <div class="create-panel">
         <div class="section-heading">
           <h2>开启创意之旅</h2>
-          <span class="model-pill">排队生成</span>
+          <div class="mode-switch" role="tablist" aria-label="创作模式">
+            <button type="button" :class="{ active: createMode === 'generate' }" :disabled="generating" @click="setCreateMode('generate')">
+              <WandSparkles :size="16" /> 生成
+            </button>
+            <button type="button" :class="{ active: createMode === 'edit' }" :disabled="generating" @click="setCreateMode('edit')">
+              <ImagePlus :size="16" /> 编辑
+            </button>
+          </div>
         </div>
-        <textarea v-model="prompt" placeholder="描绘你心中的画面（支持详细的提示词）..." :disabled="generating"></textarea>
+        <label v-if="createMode === 'edit'" class="upload-box" :class="{ filled: sourcePreview }">
+          <input type="file" accept="image/png,image/jpeg,image/webp" :disabled="generating" @change="handleSourceFile" />
+          <template v-if="sourcePreview">
+            <img :src="sourcePreview" alt="待编辑原图预览" />
+            <span>更换图片</span>
+          </template>
+          <template v-else>
+            <UploadCloud :size="28" />
+            <strong>上传需要编辑的图片</strong>
+            <small>支持 PNG、JPG、WEBP，最大 10MB</small>
+          </template>
+        </label>
+        <button v-if="sourcePreview && !generating" class="ghost-button compact clear-upload" type="button" @click="clearSourceImage">
+          <Trash2 :size="16" /> 移除原图
+        </button>
+        <textarea
+          v-model="prompt"
+          :placeholder="createMode === 'edit' ? '描述你希望如何修改这张图片...' : '描绘你心中的画面（支持详细的提示词）...'"
+          :disabled="generating"
+        ></textarea>
         <div v-if="queueState" class="queue-card">
           <strong>{{ queueText() }}</strong>
           <span>队列 {{ queueState.queue.queued }} · 生成中 {{ queueState.queue.running }}</span>
         </div>
         <div class="create-footer">
-          <label><input type="checkbox" checked disabled />提交的提示词及成功生成的图像将公开展示在本地画廊。</label>
-          <button class="primary-button" :disabled="generating" @click="generateImage">
+          <label><input type="checkbox" checked disabled />提交的提示词、原图及成功结果会保存到本地记录，成功结果将公开展示在画廊。</label>
+          <button class="primary-button" :disabled="generating" @click="submitImageJob">
             <RefreshCw v-if="generating" class="spin" :size="18" />
             <WandSparkles v-else :size="18" />
-            {{ generating ? '等待结果' : user ? '立即生成' : '登录后生成' }}
+            {{ generating ? '等待结果' : user ? (createMode === 'edit' ? '提交编辑' : '立即生成') : '登录后提交' }}
           </button>
         </div>
         <p v-if="message" class="message">{{ message }}</p>
@@ -369,28 +512,44 @@ function statusLabel(status) {
     <section v-if="user" class="records-section">
       <div class="section-heading">
         <h2>我的生成记录</h2>
-        <button class="ghost-button compact" @click="loadMyImages">刷新</button>
-      </div>
-      <div v-if="myImages.length === 0" class="empty-state small-empty">暂无生成记录</div>
-      <div v-else class="records-list">
-        <article v-for="item in myImages" :key="item.id" class="record-row">
-          <div>
-            <strong>#{{ item.id }} · {{ statusLabel(item.status) }}</strong>
-            <p>{{ item.prompt }}</p>
-            <span>{{ item.completed_at || item.created_at }}</span>
-            <em v-if="item.error">{{ item.error }}</em>
-          </div>
-          <button
-            type="button"
-            class="tiny-button"
-            :class="{ disabled: item.status !== 'ready' }"
-            :disabled="item.status !== 'ready'"
-            @click="openPreview(item)"
-          >
-            打开图片
+        <div class="records-actions">
+          <button v-if="recordsOpen" class="ghost-button compact" :disabled="recordsLoading" @click="loadMyImages(true)">刷新</button>
+          <button class="ghost-button compact collapse-toggle" :class="{ active: recordsOpen }" @click="toggleRecords">
+            <ChevronDown :size="17" />
+            {{ recordsOpen ? '收起' : '展开' }}
           </button>
-        </article>
+        </div>
       </div>
+      <template v-if="recordsOpen">
+        <div v-if="recordsLoading && myImages.length === 0" class="empty-state small-empty">正在加载生成记录</div>
+        <div v-else-if="recordsLoaded && myImages.length === 0" class="empty-state small-empty">暂无生成记录</div>
+        <div v-else class="records-list">
+          <article v-for="item in myImages" :key="item.id" class="record-row" :class="{ 'has-source': item.source_image_url }">
+            <button v-if="item.source_image_url" class="record-source" type="button" @click="openPreview(item)">
+              <img :src="mediaUrl(item.source_image_url)" alt="编辑原图" />
+            </button>
+            <div>
+              <strong>#{{ item.id }} · {{ taskLabel(item.task_type) }} · {{ statusLabel(item.status) }}</strong>
+              <p>{{ item.prompt }}</p>
+              <span>{{ item.completed_at || item.created_at }}</span>
+              <em v-if="item.error">{{ item.error }}</em>
+            </div>
+            <button
+              type="button"
+              class="tiny-button"
+              :class="{ disabled: item.status !== 'ready' }"
+              :disabled="item.status !== 'ready'"
+              @click="openPreview(item)"
+            >
+              打开图片
+            </button>
+          </article>
+          <button v-if="recordsHasMore" class="ghost-button records-more" :disabled="recordsLoading" @click="loadMyImages(false)">
+            <RefreshCw v-if="recordsLoading" class="spin" :size="17" />
+            {{ recordsLoading ? '加载中' : '加载更多记录' }}
+          </button>
+        </div>
+      </template>
     </section>
 
     <section class="gallery-section">
@@ -409,11 +568,12 @@ function statusLabel(status) {
         <article v-for="image in images" :key="image.id" class="gallery-card">
           <button v-if="image.status === 'ready'" class="image-frame preview-trigger" type="button" @click="openPreview(image)">
             <img :src="mediaUrl(image.image_url)" :alt="image.prompt" />
+            <span v-if="image.task_type === 'edit'" class="task-badge">编辑</span>
             <span class="preview-hint">查看大图</span>
           </button>
           <div v-else class="image-frame">
             <div class="failed-state">
-              <strong>{{ image.status === 'failed' ? '生成失败' : image.status === 'running' ? '生成中' : '排队中' }}</strong>
+              <strong>{{ image.status === 'failed' ? `${taskLabel(image.task_type)}失败` : image.status === 'running' ? `${taskLabel(image.task_type)}中` : '排队中' }}</strong>
               <span>{{ image.error || image.prompt }}</span>
             </div>
           </div>
@@ -438,6 +598,13 @@ function statusLabel(status) {
           </div>
         </article>
       </div>
+      <div v-if="!loading" class="load-more-state">
+        <button v-if="galleryHasMore" class="ghost-button compact" :disabled="galleryLoadingMore" @click="loadImages(false)">
+          <RefreshCw v-if="galleryLoadingMore" class="spin" :size="17" />
+          {{ galleryLoadingMore ? '加载中' : '加载更多' }}
+        </button>
+        <span v-else-if="images.length">已经到底了</span>
+      </div>
     </section>
 
     <div v-if="previewImage" class="preview-modal" role="dialog" aria-modal="true" @click.self="closePreview">
@@ -452,6 +619,10 @@ function statusLabel(status) {
 
         <section class="preview-info">
           <p class="preview-prompt">{{ previewImage.prompt }}</p>
+          <div v-if="previewImage.source_image_url" class="source-preview-line">
+            <img :src="mediaUrl(previewImage.source_image_url)" alt="编辑原图" />
+            <span>由这张原图编辑生成</span>
+          </div>
           <div class="preview-meta">
             <div class="preview-author">
               <div class="avatar small" :style="{ background: previewImage.author.avatar_color }">
