@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var errNoImageData = errors.New("生图接口未返回图片数据")
+
 const providerAttempts = 3
 
 const (

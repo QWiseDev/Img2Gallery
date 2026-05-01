@@ -45,11 +45,7 @@ func (c *ProviderClient) GenerateAndStore(prompt string, provider Provider) (str
 	req, _ := http.NewRequest(http.MethodPost, strings.TrimRight(provider.APIBase, "/")+"/v1/images/generations", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
-	response, err := c.do(req, "生图接口")
-	if err != nil {
-		return "", err
-	}
-	imageBytes, suffix, err := c.extractImage(response)
+	imageBytes, suffix, err := c.requestImage(req, "生图接口")
 	if err != nil {
 		return "", err
 	}
@@ -76,15 +72,36 @@ func (c *ProviderClient) EditAndStore(prompt, sourceImagePath string, provider P
 	req, _ := http.NewRequest(http.MethodPost, strings.TrimRight(provider.APIBase, "/")+"/v1/images/edits", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
-	response, err := c.do(req, "图片编辑接口")
-	if err != nil {
-		return "", err
-	}
-	imageBytes, suffix, err := c.extractImage(response)
+	imageBytes, suffix, err := c.requestImage(req, "图片编辑接口")
 	if err != nil {
 		return "", err
 	}
 	return c.storeImageBytes(imageBytes, suffix)
+}
+
+func (c *ProviderClient) requestImage(req *http.Request, label string) ([]byte, string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= providerAttempts; attempt++ {
+		if attempt > 1 {
+			if err := resetRequestBody(req); err != nil {
+				return nil, "", err
+			}
+			waitProviderRetry(req, attempt)
+		}
+		response, err := c.do(req, label)
+		if err != nil {
+			return nil, "", err
+		}
+		imageBytes, suffix, err := c.extractImage(response)
+		if err == nil {
+			return imageBytes, suffix, nil
+		}
+		lastErr = err
+		if !errors.Is(err, errNoImageData) {
+			return nil, "", err
+		}
+	}
+	return nil, "", lastErr
 }
 
 func (c *ProviderClient) do(req *http.Request, label string) (*imageResponse, error) {
@@ -129,7 +146,7 @@ func (c *ProviderClient) do(req *http.Request, label string) (*imageResponse, er
 
 func (c *ProviderClient) extractImage(payload *imageResponse) ([]byte, string, error) {
 	if payload == nil || len(payload.Data) == 0 {
-		return nil, "", errors.New("生图接口未返回图片数据")
+		return nil, "", errNoImageData
 	}
 	first := payload.Data[0]
 	if first.B64JSON != "" {

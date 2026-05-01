@@ -78,6 +78,31 @@ func TestProviderDoReadsLargeSuccessfulJSON(t *testing.T) {
 	}
 }
 
+func TestRequestImageRetriesEmptyData(t *testing.T) {
+	stubRetryDelay(t)
+	calls := 0
+	client := &ProviderClient{client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return response(http.StatusOK, `{"created":1,"data":[]}`), nil
+		}
+		return response(http.StatusOK, `{"data":[{"b64_json":"aW1hZ2U="}]}`), nil
+	})}}
+	req, _ := http.NewRequest(http.MethodPost, "https://example.test/v1/images/generations", strings.NewReader(`{"prompt":"test"}`))
+
+	imageBytes, suffix, err := client.requestImage(req, "生图接口")
+
+	if err != nil {
+		t.Fatalf("requestImage returned error: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 calls, got %d", calls)
+	}
+	if string(imageBytes) != "image" || suffix != ".png" {
+		t.Fatalf("unexpected image result: %q %s", string(imageBytes), suffix)
+	}
+}
+
 func TestProviderDoDoesNotRetryBadRequest(t *testing.T) {
 	stubRetryDelay(t)
 	calls := 0
