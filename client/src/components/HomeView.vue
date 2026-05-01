@@ -9,11 +9,13 @@ import {
   ExternalLink,
   Heart,
   ImagePlus,
+  LogIn,
   LogOut,
   RefreshCw,
   Sparkles,
   Trash2,
   UploadCloud,
+  UserPlus,
   UserRound,
   WandSparkles,
   X,
@@ -459,96 +461,117 @@ function taskLabel(taskType) {
 
 <template>
   <main class="page-shell">
-    <section class="top-grid">
-      <div class="hero-panel">
-        <div class="kicker">AI Prompt Gallery</div>
-        <h1>创意灵感画廊与<br /><span>生图大厅</span></h1>
-        <p>探索社区创作的精彩瞬间。登录后即可提交提示词生成图片，作品会保存到本地画廊，并支持点赞、收藏与按热度筛选。</p>
-      </div>
+    <div class="mobile-auth-actions">
+      <template v-if="user">
+        <button class="mobile-auth-button user" type="button" :title="user.display_name" :aria-label="user.display_name">
+          <span class="avatar tiny" :style="{ background: user.avatar_color }">{{ user.display_name.slice(0, 1).toUpperCase() }}</span>
+        </button>
+        <button class="mobile-auth-button" type="button" title="退出登录" aria-label="退出登录" @click="logout">
+          <LogOut :size="18" />
+        </button>
+      </template>
+      <template v-else>
+        <button class="mobile-auth-button" type="button" title="登录" aria-label="登录" @click="openAuthModal('login')">
+          <LogIn :size="18" />
+        </button>
+        <button class="mobile-auth-button accent" type="button" title="注册" aria-label="注册" @click="openAuthModal('register')">
+          <UserPlus :size="18" />
+        </button>
+      </template>
+    </div>
 
-      <aside class="status-panel">
-        <div class="status-title">
-          <h2>运行状态</h2>
-          <span class="pill success"><span></span> API 就绪</span>
-        </div>
-        <div class="stat-grid">
-          <div><small>已加载作品</small><strong>{{ images.length }}</strong></div>
-          <div><small>已加载完成</small><strong>{{ stats.ready }}</strong></div>
-          <div><small>已加载点赞</small><strong>{{ stats.likes }}</strong></div>
-          <div><small>当前身份</small><strong class="identity">{{ currentName }}</strong></div>
-        </div>
-      </aside>
-    </section>
+    <section class="studio-grid">
+      <div class="studio-main">
+        <header class="studio-header">
+          <div>
+            <div class="kicker">AI Prompt Gallery</div>
+            <h1>AI 生图工作台</h1>
+          </div>
+          <div class="studio-actions">
+            <span class="pill success"><span></span> API 就绪</span>
+            <template v-if="user">
+              <div class="user-chip" :title="user.username">
+                <span class="avatar tiny" :style="{ background: user.avatar_color }">{{ user.display_name.slice(0, 1).toUpperCase() }}</span>
+                <strong>{{ user.display_name }}</strong>
+              </div>
+              <button class="header-icon-button" type="button" title="退出登录" aria-label="退出登录" @click="logout">
+                <LogOut :size="18" />
+              </button>
+            </template>
+            <template v-else>
+              <button class="header-icon-button" type="button" @click="openAuthModal('login')">
+                <LogIn :size="18" /> 登录
+              </button>
+              <button class="header-icon-button accent" type="button" @click="openAuthModal('register')">
+                <UserPlus :size="18" /> 注册
+              </button>
+            </template>
+          </div>
+        </header>
 
-    <section class="workspace-grid">
-      <div class="create-panel">
-        <div class="section-heading">
-          <h2>开启创意之旅</h2>
-          <div class="mode-switch" role="tablist" aria-label="创作模式">
+        <div class="create-panel command-panel">
+          <div class="section-heading">
+            <div>
+              <h2>创作指令</h2>
+              <p class="section-subtitle">输入提示词，选择生成或上传图片编辑。</p>
+            </div>
+            <div class="mode-switch" role="tablist" aria-label="创作模式">
             <button type="button" :class="{ active: createMode === 'generate' }" :disabled="generating" @click="setCreateMode('generate')">
               <WandSparkles :size="16" /> 生成
             </button>
             <button type="button" :class="{ active: createMode === 'edit' }" :disabled="generating" @click="setCreateMode('edit')">
               <ImagePlus :size="16" /> 编辑
             </button>
-          </div>
-        </div>
-        <label v-if="createMode === 'edit'" class="upload-box" :class="{ filled: sourcePreview }">
-          <input type="file" accept="image/png,image/jpeg,image/webp" :disabled="generating" @change="handleSourceFile" />
-          <template v-if="sourcePreview">
-            <img :src="sourcePreview" alt="待编辑原图预览" />
-            <span>更换图片</span>
-          </template>
-          <template v-else>
-            <UploadCloud :size="28" />
-            <strong>上传需要编辑的图片</strong>
-            <small>支持 PNG、JPG、WEBP，最大 10MB</small>
-          </template>
-        </label>
-        <button v-if="sourcePreview && !generating" class="ghost-button compact clear-upload" type="button" @click="clearSourceImage">
-          <Trash2 :size="16" /> 移除原图
-        </button>
-        <textarea
-          v-model="prompt"
-          :placeholder="createMode === 'edit' ? '描述你希望如何修改这张图片...' : '描绘你心中的画面（支持详细的提示词）...'"
-          :disabled="generating"
-        ></textarea>
-        <div v-if="queueState" class="queue-card">
-          <strong>{{ queueText() }}</strong>
-          <span>队列 {{ queueState.queue.queued }} · 生成中 {{ queueState.queue.running }}</span>
-        </div>
-        <div class="create-footer">
-          <label><input type="checkbox" checked disabled />提交的提示词、原图及成功结果会保存到本地记录，成功结果将公开展示在画廊。</label>
-          <button class="primary-button" :disabled="generating" @click="submitImageJob">
-            <RefreshCw v-if="generating" class="spin" :size="18" />
-            <WandSparkles v-else :size="18" />
-            {{ generating ? '等待结果' : user ? (createMode === 'edit' ? '提交编辑' : '立即生成') : '登录后提交' }}
-          </button>
-        </div>
-        <p v-if="message" class="message">{{ message }}</p>
-      </div>
-
-      <aside class="account-panel">
-        <template v-if="user">
-          <div class="profile-row">
-            <div class="avatar" :style="{ background: user.avatar_color }">{{ user.display_name.slice(0, 1).toUpperCase() }}</div>
-            <div><h2>{{ user.display_name }}</h2><p>@{{ user.username }}</p></div>
-          </div>
-          <button class="ghost-button" @click="logout"><LogOut :size="18" /> 退出登录</button>
-        </template>
-
-        <template v-else>
-          <div class="login-teaser">
-            <div class="avatar guest"><UserRound :size="28" /></div>
-            <div>
-              <h2>登录后生成图片</h2>
-              <p>提交提示词、查看个人记录、点赞和收藏都需要账号。</p>
             </div>
           </div>
-          <button class="primary-button wide" @click="openAuthModal('login')">
-            <UserRound :size="18" /> 登录 / 注册
+          <label v-if="createMode === 'edit'" class="upload-box" :class="{ filled: sourcePreview }">
+            <input type="file" accept="image/png,image/jpeg,image/webp" :disabled="generating" @change="handleSourceFile" />
+            <template v-if="sourcePreview">
+              <img :src="sourcePreview" alt="待编辑原图预览" />
+              <span>更换图片</span>
+            </template>
+            <template v-else>
+              <UploadCloud :size="28" />
+              <strong>上传需要编辑的图片</strong>
+              <small>支持 PNG、JPG、WEBP，最大 10MB</small>
+            </template>
+          </label>
+          <button v-if="sourcePreview && !generating" class="ghost-button compact clear-upload" type="button" @click="clearSourceImage">
+            <Trash2 :size="16" /> 移除原图
           </button>
-        </template>
+          <textarea
+            v-model="prompt"
+            :placeholder="createMode === 'edit' ? '描述你希望如何修改这张图片...' : '描绘你心中的画面（支持详细的提示词）...'"
+            :disabled="generating"
+          ></textarea>
+          <div v-if="queueState" class="queue-card">
+            <strong>{{ queueText() }}</strong>
+            <span>队列 {{ queueState.queue.queued }} · 生成中 {{ queueState.queue.running }}</span>
+          </div>
+          <div class="create-footer">
+            <label><input type="checkbox" checked disabled />成功结果会保存到本地，并展示在公共画廊。</label>
+            <button class="primary-button" :disabled="generating" @click="submitImageJob">
+              <RefreshCw v-if="generating" class="spin" :size="18" />
+              <WandSparkles v-else :size="18" />
+              {{ generating ? '等待结果' : user ? (createMode === 'edit' ? '提交编辑' : '立即生成') : '登录后提交' }}
+            </button>
+          </div>
+          <p v-if="message" class="message">{{ message }}</p>
+        </div>
+      </div>
+
+      <aside class="studio-side">
+        <aside class="status-panel">
+          <div class="status-title">
+            <h2>运行状态</h2>
+          </div>
+          <div class="stat-grid">
+            <div><small>作品</small><strong>{{ images.length }}</strong></div>
+            <div><small>完成</small><strong>{{ stats.ready }}</strong></div>
+            <div><small>点赞</small><strong>{{ stats.likes }}</strong></div>
+            <div><small>身份</small><strong class="identity">{{ currentName }}</strong></div>
+          </div>
+        </aside>
       </aside>
     </section>
 
