@@ -9,20 +9,24 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/QWiseDev/Img2Gallery/server-go/internal/app"
 	"github.com/QWiseDev/Img2Gallery/server-go/internal/config"
-	"github.com/QWiseDev/Img2Gallery/server-go/internal/httpx"
 )
 
 func main() {
 	cfg := config.Load()
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	if err := app.EnsureStorage(cfg); err != nil {
+		log.Fatalf("storage init failed: %v", err)
+	}
+	handler, database, err := app.New(cfg)
+	if err != nil {
+		log.Fatalf("app init failed: %v", err)
+	}
+	defer database.Close()
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
