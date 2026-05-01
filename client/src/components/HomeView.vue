@@ -17,6 +17,7 @@ const authMode = ref('login')
 const authForm = ref({ username: '', password: '', display_name: '' })
 const prompt = ref('')
 const images = ref([])
+const myImages = ref([])
 const sort = ref('latest')
 const loading = ref(true)
 const authLoading = ref(false)
@@ -49,12 +50,25 @@ async function bootstrap() {
     user.value = null
   }
   await loadImages()
+  if (user.value) await loadMyImages()
   loading.value = false
 }
 
 async function loadImages() {
   try {
     images.value = await api.images(sort.value)
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+async function loadMyImages() {
+  if (!user.value) {
+    myImages.value = []
+    return
+  }
+  try {
+    myImages.value = await api.myImages()
   } catch (error) {
     message.value = error.message
   }
@@ -68,6 +82,7 @@ async function submitAuth() {
     user.value = authMode.value === 'login' ? await api.login(payload) : await api.register(payload)
     authForm.value = { username: '', password: '', display_name: '' }
     await loadImages()
+    await loadMyImages()
   } catch (error) {
     message.value = error.message
   } finally {
@@ -81,6 +96,7 @@ async function logout() {
   user.value = null
   sort.value = 'latest'
   queueState.value = null
+  myImages.value = []
   await loadImages()
 }
 
@@ -98,6 +114,7 @@ async function generateImage() {
   try {
     const created = await api.createImage(prompt.value.trim())
     images.value = [created, ...images.value.filter((item) => item.id !== created.id)]
+    myImages.value = [created, ...myImages.value.filter((item) => item.id !== created.id)]
     prompt.value = ''
     watchJob(created.id)
   } catch (error) {
@@ -117,6 +134,7 @@ function watchJob(id) {
       generating.value = false
       closeEvents()
       await loadImages()
+      await loadMyImages()
     }
   }
   eventSource.onerror = () => {
@@ -156,6 +174,7 @@ async function toggleFavorite(image) {
 
 function replaceImage(updated) {
   images.value = images.value.map((item) => (item.id === updated.id ? updated : item))
+  myImages.value = myImages.value.map((item) => (item.id === updated.id ? updated : item))
 }
 
 function queueText() {
@@ -173,6 +192,11 @@ function dateOnly(value) {
 
 function timeOnly(value) {
   return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function statusLabel(status) {
+  const labels = { queued: '排队中', running: '生成中', ready: '已完成', failed: '失败' }
+  return labels[status] || status
 }
 </script>
 
@@ -245,6 +269,33 @@ function timeOnly(value) {
       </aside>
     </section>
 
+    <section v-if="user" class="records-section">
+      <div class="section-heading">
+        <h2>我的生成记录</h2>
+        <button class="ghost-button compact" @click="loadMyImages">刷新</button>
+      </div>
+      <div v-if="myImages.length === 0" class="empty-state small-empty">暂无生成记录</div>
+      <div v-else class="records-list">
+        <article v-for="item in myImages" :key="item.id" class="record-row">
+          <div>
+            <strong>#{{ item.id }} · {{ statusLabel(item.status) }}</strong>
+            <p>{{ item.prompt }}</p>
+            <span>{{ item.completed_at || item.created_at }}</span>
+            <em v-if="item.error">{{ item.error }}</em>
+          </div>
+          <a
+            class="tiny-button"
+            :class="{ disabled: item.status !== 'ready' }"
+            :href="item.status === 'ready' ? mediaUrl(item.image_url) : undefined"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            打开图片
+          </a>
+        </article>
+      </div>
+    </section>
+
     <section class="gallery-section">
       <div class="section-heading">
         <h2>社区画廊</h2>
@@ -290,4 +341,3 @@ function timeOnly(value) {
     </section>
   </main>
 </template>
-

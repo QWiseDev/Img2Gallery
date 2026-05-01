@@ -184,6 +184,39 @@ def list_images(viewer_id: int | None, sort: str) -> list[dict]:
     return [serialize_image(row) for row in rows]
 
 
+def list_user_images(user_id: int) -> list[dict]:
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT
+                images.*,
+                users.username,
+                users.display_name,
+                users.avatar_color,
+                COUNT(DISTINCT image_likes.user_id) AS likes,
+                COUNT(DISTINCT image_favorites.user_id) AS favorites,
+                EXISTS(
+                    SELECT 1 FROM image_likes mine
+                    WHERE mine.image_id = images.id AND mine.user_id = ?
+                ) AS liked_by_me,
+                EXISTS(
+                    SELECT 1 FROM image_favorites fav
+                    WHERE fav.image_id = images.id AND fav.user_id = ?
+                ) AS favorited_by_me
+            FROM images
+            JOIN users ON users.id = images.user_id
+            LEFT JOIN image_likes ON image_likes.image_id = images.id
+            LEFT JOIN image_favorites ON image_favorites.image_id = images.id
+            WHERE images.user_id = ?
+            GROUP BY images.id
+            ORDER BY images.id DESC
+            LIMIT 120
+            """,
+            (user_id, user_id, user_id),
+        ).fetchall()
+    return [serialize_image(row) for row in rows]
+
+
 def get_image(image_id: int, viewer_id: int | None) -> dict | None:
     with get_db() as db:
         row = db.execute(

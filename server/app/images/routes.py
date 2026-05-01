@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse
 from app.auth.service import current_user
 
 from .queue import job_events
-from .repository import add_image, get_image, list_images, toggle_relation
+from .repository import add_image, get_image, list_images, list_user_images, toggle_relation
 from .schemas import ImageCreate, ImageOut
 
 router = APIRouter(prefix="/api/images", tags=["images"])
@@ -28,6 +28,11 @@ def client_ip(request: Request) -> str | None:
 def gallery(sort: str = "latest", user: dict | None = Depends(optional_user)):
     safe_sort = sort if sort in {"latest", "popular", "favorites"} else "latest"
     return list_images(user["id"] if user else None, safe_sort)
+
+
+@router.get("/mine", response_model=list[ImageOut])
+def my_images(user: dict = Depends(current_user)):
+    return list_user_images(user["id"])
 
 
 @router.post("", response_model=ImageOut)

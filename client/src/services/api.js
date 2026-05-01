@@ -26,6 +26,7 @@ export const api = {
   register: (payload) => request('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
   logout: () => request('/api/auth/logout', { method: 'POST', body: JSON.stringify({}) }),
   images: (sort) => request(`/api/images?sort=${encodeURIComponent(sort)}`),
+  myImages: () => request('/api/images/mine'),
   createImage: (prompt) => request('/api/images', { method: 'POST', body: JSON.stringify({ prompt }) }),
   jobEventsUrl: (id) => `${API_BASE}/api/images/${id}/events`,
   like: (id) => request(`/api/images/${id}/like`, { method: 'POST', body: JSON.stringify({}) }),

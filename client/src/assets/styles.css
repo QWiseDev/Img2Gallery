@@ -57,6 +57,7 @@ textarea:disabled {
 .create-panel,
 .account-panel,
 .gallery-section,
+.records-section,
 .admin-card {
   border: 1px solid rgba(204, 213, 225, 0.72);
   border-radius: 32px;
@@ -376,6 +377,11 @@ h2 {
   padding: 30px 20px 36px;
 }
 
+.records-section {
+  margin-bottom: 34px;
+  padding: 28px 32px;
+}
+
 .gallery-section > .section-heading {
   padding: 0 12px 24px;
 }
@@ -527,6 +533,49 @@ h2 {
   gap: 12px;
   color: #64748b;
   font-weight: 800;
+}
+
+.small-empty {
+  min-height: 120px;
+}
+
+.records-list {
+  display: grid;
+  gap: 14px;
+}
+
+.record-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  border: 1px solid #e5edf5;
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.82);
+  padding: 16px;
+}
+
+.record-row p {
+  margin: 8px 0;
+  color: #475569;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.record-row span,
+.record-row em {
+  display: block;
+  color: #8a9ab2;
+  font-size: 13px;
+  font-style: normal;
+}
+
+.record-row em {
+  color: #be123c;
+  margin-top: 6px;
 }
 
 .spin {
@@ -733,12 +782,21 @@ h2 {
   color: #64748b;
   font-weight: 800;
   padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .tiny-button.active {
   border-color: #99f6e4;
   background: #ecfdf5;
   color: #047857;
+}
+
+.tiny-button.disabled {
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .tiny-button.danger {
@@ -767,7 +825,8 @@ h2 {
   .hero-panel,
   .status-panel,
   .create-panel,
-  .account-panel {
+  .account-panel,
+  .records-section {
     border-radius: 22px;
     padding: 24px;
   }
@@ -807,5 +866,9 @@ h2 {
   .segmented button {
     flex: 1;
     padding: 0 8px;
+  }
+
+  .record-row {
+    grid-template-columns: 1fr;
   }
 }
