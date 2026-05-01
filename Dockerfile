@@ -6,11 +6,17 @@ RUN npm ci
 COPY client/ ./
 RUN npm run build
 
-FROM python:3.12-slim AS runtime
+FROM golang:1.25-alpine AS backend
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/server \
+WORKDIR /app/server-go
+COPY server-go/go.mod server-go/go.sum ./
+RUN go mod download
+COPY server-go/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/img2gallery ./cmd/server
+
+FROM alpine:3.22 AS runtime
+
+ENV ADDR=0.0.0.0:8000 \
     DATABASE_PATH=/data/app.db \
     IMAGE_STORAGE_DIR=/data/images \
     CLIENT_ORIGIN=http://localhost:8000 \
@@ -19,19 +25,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN useradd --create-home --shell /usr/sbin/nologin appuser \
+RUN adduser -D -H -s /sbin/nologin appuser \
     && mkdir -p /data/images \
     && chown -R appuser:appuser /data
 
-COPY server/requirements.txt ./server/requirements.txt
-RUN pip install --no-cache-dir -r server/requirements.txt
-
-COPY server/app ./server/app
-COPY --from=frontend /app/client/dist ./client/dist
+COPY --from=backend /out/img2gallery /app/img2gallery
+COPY --from=frontend /app/client/dist /app/client/dist
 
 RUN chown -R appuser:appuser /app
 
 USER appuser
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/img2gallery"]

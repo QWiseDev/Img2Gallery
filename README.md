@@ -1,6 +1,6 @@
 # Img2Gallery 使用文档
 
-Img2Gallery 是一个 Vue + FastAPI + SQLite 的 AI 生图画廊。它支持账号注册登录、图片验证码、队列生图、首页画廊、个人生成记录、点赞收藏、管理员后台、模型提供商配置和本地图片存储。
+Img2Gallery 是一个 Vue + Go + SQLite 的 AI 生图画廊。它支持账号注册登录、图片验证码、队列生图、图片编辑、首页画廊、个人生成记录、点赞收藏、管理员后台、模型提供商配置和本地图片存储。
 
 ## 功能概览
 
@@ -69,14 +69,10 @@ docker compose up -d
 后端：
 
 ```bash
-cd server
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cd ..
 cp .env.example .env
-cd server
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+cd server-go
+go mod download
+ADDR=127.0.0.1:8000 go run ./cmd/server
 ```
 
 前端：
@@ -84,7 +80,6 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```bash
 cd client
 npm install
-cp .env.example .env
 npm run dev
 ```
 
@@ -95,6 +90,13 @@ http://127.0.0.1:5173
 ```
 
 Docker 镜像内前端默认使用同源 API，也就是访问 `http://服务器IP:8000` 时会请求同一个域名下的 `/api/...`，不需要额外配置 `VITE_API_BASE`。
+
+本地如果需要复用已有 SQLite 和图片目录，可显式指定：
+
+```bash
+cd server-go
+DATABASE_PATH=../server/app.db IMAGE_STORAGE_DIR=../server/storage/images ADDR=127.0.0.1:8000 go run ./cmd/server
+```
 
 ## 管理后台
 
