@@ -1,6 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { LogOut, RefreshCw, Save, ShieldCheck, SlidersHorizontal, Users } from 'lucide-vue-next'
+import { Eye, EyeOff, LogOut, RefreshCw, Save, ShieldCheck, SlidersHorizontal, Users } from 'lucide-vue-next'
 import { api } from '../services/api'
 
 const authed = ref(false)
@@ -156,6 +156,19 @@ async function deleteGeneration(item) {
   }
 }
 
+async function toggleGenerationHidden(item) {
+  busyItem.value = `hidden-${item.id}`
+  try {
+    await api.adminSetGenerationHidden(item.id, !item.is_hidden)
+    await loadAdminData(false)
+    message.value = item.is_hidden ? `已恢复作品 #${item.id}` : `已隐藏作品 #${item.id}`
+  } catch (error) {
+    message.value = error.message
+  } finally {
+    busyItem.value = ''
+  }
+}
+
 function editProvider(provider) {
   providerForm.value = { ...provider, api_key: '' }
 }
@@ -281,18 +294,24 @@ function shortPrompt(text) {
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th>ID</th><th>类型</th><th>用户</th><th>状态</th><th>IP</th><th>模型</th><th>提示词</th><th>完成时间</th><th>操作</th></tr></thead>
+            <thead><tr><th>ID</th><th>类型</th><th>用户</th><th>状态</th><th>可见性</th><th>IP</th><th>模型</th><th>提示词</th><th>完成时间</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="item in generations" :key="item.id">
                 <td>{{ item.id }}</td>
                 <td>{{ item.task_type === 'edit' ? '编辑' : '生成' }}</td>
                 <td>{{ item.display_name }}<br /><span>@{{ item.username }}</span></td>
                 <td>{{ item.status }}</td>
+                <td>{{ item.is_hidden ? '已隐藏' : '公开' }}</td>
                 <td>{{ item.request_ip || '-' }}</td>
                 <td>{{ item.model || '-' }}</td>
                 <td>{{ shortPrompt(item.prompt) }}</td>
                 <td>{{ item.completed_at || item.created_at }}</td>
                 <td>
+                  <button class="tiny-button" :class="{ active: item.is_hidden }" :disabled="busyItem === `hidden-${item.id}`" @click="toggleGenerationHidden(item)">
+                    <Eye v-if="item.is_hidden" :size="15" />
+                    <EyeOff v-else :size="15" />
+                    {{ item.is_hidden ? '恢复' : '隐藏' }}
+                  </button>
                   <button class="tiny-button danger" :disabled="busyItem === `generation-${item.id}`" @click="deleteGeneration(item)">删除</button>
                 </td>
               </tr>

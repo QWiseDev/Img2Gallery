@@ -767,6 +767,13 @@ h2 {
   color: #ea580c;
 }
 
+.card-actions button.danger {
+  min-width: 42px;
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+}
+
 .empty-state {
   min-height: 260px;
   display: grid;
@@ -1039,6 +1046,17 @@ h2 {
   color: #111827;
 }
 
+.preview-action.danger {
+  border-color: rgba(254, 205, 211, 0.52);
+  background: rgba(190, 18, 60, 0.18);
+  color: #fecdd3;
+}
+
+.preview-action.danger:hover,
+.preview-action.danger:focus-visible {
+  background: rgba(190, 18, 60, 0.3);
+}
+
 .spin {
   animation: spin 0.8s linear infinite;
 }
@@ -1251,6 +1269,10 @@ h2 {
   align-items: center;
   justify-content: center;
   text-decoration: none;
+}
+
+.admin-table td .tiny-button + .tiny-button {
+  margin-left: 8px;
 }
 
 .tiny-button.active {

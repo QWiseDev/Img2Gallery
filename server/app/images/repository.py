@@ -11,6 +11,7 @@ def serialize_image(row) -> dict:
         "task_type": row["task_type"],
         "source_image_path": source_image_path,
         "source_image_url": f"/media/{source_image_path}" if source_image_path else None,
+        "is_hidden": bool(row["is_hidden"]),
         "status": row["status"],
         "error": row["error"],
         "request_ip": row["request_ip"],
@@ -164,11 +165,14 @@ def queue_position(image_id: int) -> int | None:
 
 def list_images(viewer_id: int | None, sort: str, limit: int, offset: int) -> list[dict]:
     order = "likes DESC, images.created_at DESC" if sort == "popular" else "images.created_at DESC"
-    favorite_filter = ""
+    where_clauses = ["images.is_hidden = 0"]
     params: list[int] = [viewer_id or 0, viewer_id or 0]
     if sort == "favorites" and viewer_id:
-        favorite_filter = "WHERE EXISTS (SELECT 1 FROM image_favorites f WHERE f.image_id = images.id AND f.user_id = ?)"
+        where_clauses.append(
+            "EXISTS (SELECT 1 FROM image_favorites f WHERE f.image_id = images.id AND f.user_id = ?)"
+        )
         params.append(viewer_id)
+    where_sql = f"WHERE {' AND '.join(where_clauses)}"
     with get_db() as db:
         rows = db.execute(
             f"""
@@ -191,7 +195,7 @@ def list_images(viewer_id: int | None, sort: str, limit: int, offset: int) -> li
             JOIN users ON users.id = images.user_id
             LEFT JOIN image_likes ON image_likes.image_id = images.id
             LEFT JOIN image_favorites ON image_favorites.image_id = images.id
-            {favorite_filter}
+            {where_sql}
             GROUP BY images.id
             ORDER BY {order}
             LIMIT ? OFFSET ?

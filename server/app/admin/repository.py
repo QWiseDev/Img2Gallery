@@ -168,6 +168,7 @@ def generation_records(limit: int = 120) -> list[dict]:
                 images.image_path,
                 images.task_type,
                 images.source_image_path,
+                images.is_hidden,
                 images.prompt,
                 images.status,
                 images.error,
@@ -188,6 +189,18 @@ def generation_records(limit: int = 120) -> list[dict]:
             (limit,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def set_generation_hidden(image_id: int, is_hidden: bool) -> dict | None:
+    with get_db() as db:
+        db.execute(
+            "UPDATE images SET is_hidden = ? WHERE id = ?",
+            (int(is_hidden), image_id),
+        )
+        row = db.execute("SELECT id, is_hidden FROM images WHERE id = ?", (image_id,)).fetchone()
+    if not row:
+        return None
+    return {"id": row["id"], "is_hidden": bool(row["is_hidden"])}
 
 
 def delete_generation(image_id: int) -> dict | None:

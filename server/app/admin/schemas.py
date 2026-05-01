@@ -21,3 +21,7 @@ class ProviderPayload(BaseModel):
 
 class UserAdminPayload(BaseModel):
     is_admin: bool
+
+
+class GenerationHiddenPayload(BaseModel):
+    is_hidden: bool

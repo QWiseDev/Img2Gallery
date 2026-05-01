@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  EyeOff,
   ExternalLink,
   Heart,
   ImagePlus,
@@ -22,6 +23,7 @@ import { api, mediaUrl } from '../services/api'
 const GALLERY_PAGE_SIZE = 24
 const RECORD_PAGE_SIZE = 8
 const user = ref(null)
+const adminAccess = ref(false)
 const authMode = ref('login')
 const authForm = ref({ username: '', password: '', display_name: '', captcha_code: '' })
 const authModalOpen = ref(false)
@@ -59,6 +61,7 @@ const stats = computed(() => {
 })
 
 const currentName = computed(() => user.value?.display_name || '游客')
+const canManageGallery = computed(() => adminAccess.value || Boolean(user.value?.is_admin))
 const sortedLabel = computed(() => {
   if (sort.value === 'popular') return '最多点赞'
   if (sort.value === 'favorites') return '我的收藏'
@@ -85,8 +88,18 @@ async function bootstrap() {
   } catch {
     user.value = null
   }
+  await refreshAdminAccess()
   await loadImages(true)
   loading.value = false
+}
+
+async function refreshAdminAccess() {
+  try {
+    await api.adminMe()
+    adminAccess.value = true
+  } catch {
+    adminAccess.value = false
+  }
 }
 
 async function loadImages(reset = false) {
@@ -151,6 +164,7 @@ async function submitAuth() {
     recordsOpen.value = false
     recordsLoaded.value = false
     myImages.value = []
+    await refreshAdminAccess()
     await loadImages(true)
   } catch (error) {
     message.value = error.message
@@ -165,6 +179,7 @@ async function logout() {
   closeEvents()
   await api.logout()
   user.value = null
+  adminAccess.value = false
   sort.value = 'latest'
   queueState.value = null
   myImages.value = []
@@ -381,6 +396,34 @@ async function toggleFavorite(image) {
   replaceImage(await api.favorite(image.id))
 }
 
+async function deleteGalleryImage(image) {
+  const ok = window.confirm(`确定删除作品 #${image.id} 吗？这会从画廊移除该记录和本地图片文件。`)
+  if (!ok) return
+  try {
+    await api.adminDeleteGeneration(image.id)
+    images.value = images.value.filter((item) => item.id !== image.id)
+    myImages.value = myImages.value.filter((item) => item.id !== image.id)
+    if (previewImage.value?.id === image.id) closePreview()
+    message.value = `已删除作品 #${image.id}`
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+async function hideGalleryImage(image) {
+  try {
+    await api.adminSetGenerationHidden(image.id, true)
+    images.value = images.value.filter((item) => item.id !== image.id)
+    myImages.value = myImages.value.map((item) =>
+      item.id === image.id ? { ...item, is_hidden: true } : item,
+    )
+    if (previewImage.value?.id === image.id) closePreview()
+    message.value = `已隐藏作品 #${image.id}`
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
 function replaceImage(updated) {
   images.value = images.value.map((item) => (item.id === updated.id ? updated : item))
   myImages.value = myImages.value.map((item) => (item.id === updated.id ? updated : item))
@@ -529,7 +572,7 @@ function taskLabel(taskType) {
               <img :src="mediaUrl(item.source_image_url)" alt="编辑原图" />
             </button>
             <div>
-              <strong>#{{ item.id }} · {{ taskLabel(item.task_type) }} · {{ statusLabel(item.status) }}</strong>
+              <strong>#{{ item.id }} · {{ taskLabel(item.task_type) }} · {{ statusLabel(item.status) }}{{ item.is_hidden ? ' · 已隐藏' : '' }}</strong>
               <p>{{ item.prompt }}</p>
               <span>{{ item.completed_at || item.created_at }}</span>
               <em v-if="item.error">{{ item.error }}</em>
@@ -568,7 +611,7 @@ function taskLabel(taskType) {
         <article v-for="image in images" :key="image.id" class="gallery-card">
           <button v-if="image.status === 'ready'" class="image-frame preview-trigger" type="button" @click="openPreview(image)">
             <img :src="mediaUrl(image.image_url)" :alt="image.prompt" />
-            <span v-if="image.task_type === 'edit'" class="task-badge">编辑</span>
+            <span v-if="image.task_type === 'edit'" class="task-badge">编辑生成</span>
             <span class="preview-hint">查看大图</span>
           </button>
           <div v-else class="image-frame">
@@ -592,6 +635,23 @@ function taskLabel(taskType) {
                 </button>
                 <button :aria-label="image.favorited_by_me ? '取消收藏' : '收藏'" :class="{ active: image.favorited_by_me }" @click="toggleFavorite(image)">
                   <Bookmark :size="18" /> {{ image.favorites }}
+                </button>
+                <button
+                  v-if="canManageGallery"
+                  :aria-label="`隐藏作品 #${image.id}`"
+                  title="隐藏作品"
+                  @click="hideGalleryImage(image)"
+                >
+                  <EyeOff :size="18" />
+                </button>
+                <button
+                  v-if="canManageGallery"
+                  class="danger"
+                  :aria-label="`删除作品 #${image.id}`"
+                  title="删除作品"
+                  @click="deleteGalleryImage(image)"
+                >
+                  <Trash2 :size="18" />
                 </button>
               </div>
             </div>
@@ -643,6 +703,14 @@ function taskLabel(taskType) {
                 <ExternalLink :size="17" />
                 打开原图
               </a>
+              <button v-if="canManageGallery" class="preview-action" type="button" @click="hideGalleryImage(previewImage)">
+                <EyeOff :size="17" />
+                隐藏作品
+              </button>
+              <button v-if="canManageGallery" class="preview-action danger" type="button" @click="deleteGalleryImage(previewImage)">
+                <Trash2 :size="17" />
+                删除作品
+              </button>
             </div>
           </div>
         </section>

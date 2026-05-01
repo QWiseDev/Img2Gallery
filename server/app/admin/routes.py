@@ -6,12 +6,13 @@ from .repository import (
     generation_records,
     get_concurrency,
     list_providers,
+    set_generation_hidden,
     set_setting,
     set_user_admin,
     upsert_provider,
     users_overview,
 )
-from .schemas import AdminLoginPayload, ConcurrencyPayload, ProviderPayload, UserAdminPayload
+from .schemas import AdminLoginPayload, ConcurrencyPayload, GenerationHiddenPayload, ProviderPayload, UserAdminPayload
 from .service import login_admin, logout_admin, require_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -67,6 +68,20 @@ def remove_generation(image_id: int, admin: dict = Depends(require_admin)):
 
         raise HTTPException(status_code=404, detail="作品不存在")
     return deleted
+
+
+@router.put("/generations/{image_id}/hidden")
+def update_generation_hidden(
+    image_id: int,
+    payload: GenerationHiddenPayload,
+    admin: dict = Depends(require_admin),
+):
+    updated = set_generation_hidden(image_id, payload.is_hidden)
+    if not updated:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="作品不存在")
+    return updated
 
 
 @router.get("/providers")

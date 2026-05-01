@@ -55,6 +55,11 @@ export const api = {
     }),
   adminGenerations: () => request('/api/admin/generations'),
   adminDeleteGeneration: (id) => request(`/api/admin/generations/${id}`, { method: 'DELETE' }),
+  adminSetGenerationHidden: (id, is_hidden) =>
+    request(`/api/admin/generations/${id}/hidden`, {
+      method: 'PUT',
+      body: JSON.stringify({ is_hidden }),
+    }),
   adminProviders: () => request('/api/admin/providers'),
   adminSaveProvider: (payload, id) => {
     const path = id ? `/api/admin/providers/${id}` : '/api/admin/providers'

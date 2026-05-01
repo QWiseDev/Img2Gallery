@@ -11,6 +11,7 @@ class ImageOut(BaseModel):
     image_url: str | None
     task_type: str = "generate"
     source_image_url: str | None = None
+    is_hidden: bool = False
     status: str
     error: str | None
     request_ip: str | None
