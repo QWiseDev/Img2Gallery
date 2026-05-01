@@ -33,7 +33,7 @@ type imageResponse struct {
 }
 
 func NewProviderClient(cfg config.Config) *ProviderClient {
-	return &ProviderClient{cfg: cfg, client: &http.Client{Timeout: requestTimeout}}
+	return &ProviderClient{cfg: cfg, client: newProviderHTTPClient()}
 }
 
 func (c *ProviderClient) GenerateAndStore(prompt string, provider Provider) (string, error) {
@@ -88,27 +88,38 @@ func (c *ProviderClient) EditAndStore(prompt, sourceImagePath string, provider P
 }
 
 func (c *ProviderClient) do(req *http.Request, label string) (*imageResponse, error) {
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, errors.New(label + "请求失败：" + err.Error())
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail := strings.TrimSpace(strings.ReplaceAll(string(raw), "\n", " "))
-		if len(detail) > 240 {
-			detail = detail[:240]
+	var lastErr error
+	for attempt := 1; attempt <= providerAttempts; attempt++ {
+		if attempt > 1 {
+			if err := resetRequestBody(req); err != nil {
+				return nil, err
+			}
+			waitProviderRetry(req, attempt)
 		}
-		if detail != "" {
-			return nil, errors.New(label + "返回 " + resp.Status + "：" + detail)
+		resp, err := c.client.Do(req)
+		if err != nil {
+			lastErr = errors.New(label + "请求失败：" + err.Error())
+			if shouldRetryProviderError(err, attempt) {
+				continue
+			}
+			return nil, lastErr
 		}
-		return nil, errors.New(label + "返回 " + resp.Status)
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		_ = resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			lastErr = providerStatusError(label, resp.Status, raw)
+			if shouldRetryProviderStatus(resp.StatusCode, attempt) {
+				continue
+			}
+			return nil, lastErr
+		}
+		var payload imageResponse
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, errors.New(label + "返回格式错误")
+		}
+		return &payload, nil
 	}
-	var payload imageResponse
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, errors.New(label + "返回格式错误")
-	}
-	return &payload, nil
+	return nil, lastErr
 }
 
 func (c *ProviderClient) extractImage(payload *imageResponse) ([]byte, string, error) {
