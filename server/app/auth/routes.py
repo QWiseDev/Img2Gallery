@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Request, Response
 
-from .schemas import AuthPayload, LoginPayload, UserOut
+from .captcha import create_captcha, verify_captcha
+from .schemas import AuthPayload, CaptchaOut, LoginPayload, UserOut
 from .service import (
     authenticate,
     clear_session,
@@ -20,8 +21,14 @@ def client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
+@router.get("/captcha", response_model=CaptchaOut)
+def captcha():
+    return create_captcha()
+
+
 @router.post("/register", response_model=UserOut)
 def register(payload: AuthPayload, request: Request, response: Response):
+    verify_captcha(payload.captcha_token, payload.captcha_code)
     user = create_user(payload.username, payload.password, payload.display_name)
     record_login(user["id"], client_ip(request))
     issue_session(response, user["id"])
@@ -30,6 +37,7 @@ def register(payload: AuthPayload, request: Request, response: Response):
 
 @router.post("/login", response_model=UserOut)
 def login(payload: LoginPayload, request: Request, response: Response):
+    verify_captcha(payload.captcha_token, payload.captcha_code)
     user = authenticate(payload.username, payload.password)
     record_login(user["id"], client_ip(request))
     issue_session(response, user["id"])

@@ -22,6 +22,7 @@ async function request(path, options = {}) {
 export const api = {
   base: API_BASE,
   me: () => request('/api/auth/me'),
+  captcha: () => request('/api/auth/captcha'),
   login: (payload) => request('/api/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
   register: (payload) => request('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
   logout: () => request('/api/auth/logout', { method: 'POST', body: JSON.stringify({}) }),

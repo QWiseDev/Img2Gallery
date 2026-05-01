@@ -2,6 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   Bookmark,
+  Check,
+  Copy,
+  ExternalLink,
   Heart,
   ImagePlus,
   LogOut,
@@ -9,12 +12,15 @@ import {
   Sparkles,
   UserRound,
   WandSparkles,
+  X,
 } from 'lucide-vue-next'
 import { api, mediaUrl } from '../services/api'
 
 const user = ref(null)
 const authMode = ref('login')
-const authForm = ref({ username: '', password: '', display_name: '' })
+const authForm = ref({ username: '', password: '', display_name: '', captcha_code: '' })
+const authModalOpen = ref(false)
+const captcha = ref(null)
 const prompt = ref('')
 const images = ref([])
 const myImages = ref([])
@@ -24,7 +30,10 @@ const authLoading = ref(false)
 const generating = ref(false)
 const message = ref('')
 const queueState = ref(null)
+const previewImage = ref(null)
+const copiedPromptId = ref(null)
 let eventSource = null
+let copyResetTimer = null
 
 const stats = computed(() => {
   const ready = images.value.filter((item) => item.status === 'ready').length
@@ -39,8 +48,15 @@ const sortedLabel = computed(() => {
   return '最新生成'
 })
 
-onMounted(bootstrap)
-onBeforeUnmount(closeEvents)
+onMounted(() => {
+  bootstrap()
+  window.addEventListener('keydown', handleKeydown)
+})
+onBeforeUnmount(() => {
+  closeEvents()
+  window.removeEventListener('keydown', handleKeydown)
+  if (copyResetTimer) clearTimeout(copyResetTimer)
+})
 
 async function bootstrap() {
   loading.value = true
@@ -78,13 +94,19 @@ async function submitAuth() {
   authLoading.value = true
   message.value = ''
   try {
-    const payload = { ...authForm.value }
+    const payload = {
+      ...authForm.value,
+      captcha_token: captcha.value?.token || '',
+    }
     user.value = authMode.value === 'login' ? await api.login(payload) : await api.register(payload)
-    authForm.value = { username: '', password: '', display_name: '' }
+    authForm.value = { username: '', password: '', display_name: '', captcha_code: '' }
+    authModalOpen.value = false
     await loadImages()
     await loadMyImages()
   } catch (error) {
     message.value = error.message
+    authForm.value.captcha_code = ''
+    await loadCaptcha()
   } finally {
     authLoading.value = false
   }
@@ -102,7 +124,8 @@ async function logout() {
 
 async function generateImage() {
   if (!user.value) {
-    message.value = '请先登录后再生成图片'
+    message.value = '请先登录后再提交提示词'
+    openAuthModal('login')
     return
   }
   if (prompt.value.trim().length < 2) {
@@ -154,6 +177,80 @@ function closeEvents() {
 async function setSort(nextSort) {
   sort.value = nextSort
   await loadImages()
+}
+
+async function openAuthModal(mode = 'login') {
+  authMode.value = mode
+  authModalOpen.value = true
+  message.value = ''
+  authForm.value.captcha_code = ''
+  await loadCaptcha()
+}
+
+function closeAuthModal() {
+  if (authLoading.value) return
+  authModalOpen.value = false
+}
+
+async function switchAuthMode(mode) {
+  authMode.value = mode
+  authForm.value.captcha_code = ''
+  message.value = ''
+  await loadCaptcha()
+}
+
+async function loadCaptcha() {
+  try {
+    captcha.value = await api.captcha()
+  } catch (error) {
+    message.value = error.message
+  }
+}
+
+function openPreview(image) {
+  if (image.status !== 'ready' || !image.image_url) return
+  previewImage.value = image
+}
+
+function closePreview() {
+  previewImage.value = null
+}
+
+function handleKeydown(event) {
+  if (event.key !== 'Escape') return
+  if (previewImage.value) closePreview()
+  else if (authModalOpen.value) closeAuthModal()
+}
+
+async function copyPrompt(image) {
+  if (!image?.prompt) return
+  try {
+    await writeClipboard(image.prompt)
+    copiedPromptId.value = image.id
+    if (copyResetTimer) clearTimeout(copyResetTimer)
+    copyResetTimer = setTimeout(() => {
+      copiedPromptId.value = null
+      copyResetTimer = null
+    }, 1600)
+  } catch {
+    message.value = '复制提示词失败'
+  }
+}
+
+async function writeClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
 }
 
 async function toggleLike(image) {
@@ -239,7 +336,7 @@ function statusLabel(status) {
           <button class="primary-button" :disabled="generating" @click="generateImage">
             <RefreshCw v-if="generating" class="spin" :size="18" />
             <WandSparkles v-else :size="18" />
-            {{ generating ? '等待结果' : '立即生成' }}
+            {{ generating ? '等待结果' : user ? '立即生成' : '登录后生成' }}
           </button>
         </div>
         <p v-if="message" class="message">{{ message }}</p>
@@ -254,18 +351,18 @@ function statusLabel(status) {
           <button class="ghost-button" @click="logout"><LogOut :size="18" /> 退出登录</button>
         </template>
 
-        <form v-else class="auth-form" @submit.prevent="submitAuth">
-          <div class="auth-tabs">
-            <button type="button" :class="{ active: authMode === 'login' }" @click="authMode = 'login'">登录</button>
-            <button type="button" :class="{ active: authMode === 'register' }" @click="authMode = 'register'">注册</button>
+        <template v-else>
+          <div class="login-teaser">
+            <div class="avatar guest"><UserRound :size="28" /></div>
+            <div>
+              <h2>登录后生成图片</h2>
+              <p>提交提示词、查看个人记录、点赞和收藏都需要账号。</p>
+            </div>
           </div>
-          <label>用户名<input v-model="authForm.username" autocomplete="username" required minlength="3" /></label>
-          <label>密码<input v-model="authForm.password" type="password" autocomplete="current-password" required minlength="6" /></label>
-          <label v-if="authMode === 'register'">昵称<input v-model="authForm.display_name" /></label>
-          <button class="primary-button wide" :disabled="authLoading">
-            <UserRound :size="18" /> {{ authLoading ? '处理中' : authMode === 'login' ? '账号登录' : '创建账号' }}
+          <button class="primary-button wide" @click="openAuthModal('login')">
+            <UserRound :size="18" /> 登录 / 注册
           </button>
-        </form>
+        </template>
       </aside>
     </section>
 
@@ -283,15 +380,15 @@ function statusLabel(status) {
             <span>{{ item.completed_at || item.created_at }}</span>
             <em v-if="item.error">{{ item.error }}</em>
           </div>
-          <a
+          <button
+            type="button"
             class="tiny-button"
             :class="{ disabled: item.status !== 'ready' }"
-            :href="item.status === 'ready' ? mediaUrl(item.image_url) : undefined"
-            target="_blank"
-            rel="noopener noreferrer"
+            :disabled="item.status !== 'ready'"
+            @click="openPreview(item)"
           >
             打开图片
-          </a>
+          </button>
         </article>
       </div>
     </section>
@@ -310,9 +407,12 @@ function statusLabel(status) {
       <div v-else-if="images.length === 0" class="empty-state"><ImagePlus :size="26" />{{ sortedLabel }} 暂无作品</div>
       <div v-else class="gallery-grid">
         <article v-for="image in images" :key="image.id" class="gallery-card">
-          <div class="image-frame">
-            <img v-if="image.status === 'ready'" :src="mediaUrl(image.image_url)" :alt="image.prompt" />
-            <div v-else class="failed-state">
+          <button v-if="image.status === 'ready'" class="image-frame preview-trigger" type="button" @click="openPreview(image)">
+            <img :src="mediaUrl(image.image_url)" :alt="image.prompt" />
+            <span class="preview-hint">查看大图</span>
+          </button>
+          <div v-else class="image-frame">
+            <div class="failed-state">
               <strong>{{ image.status === 'failed' ? '生成失败' : image.status === 'running' ? '生成中' : '排队中' }}</strong>
               <span>{{ image.error || image.prompt }}</span>
             </div>
@@ -339,5 +439,79 @@ function statusLabel(status) {
         </article>
       </div>
     </section>
+
+    <div v-if="previewImage" class="preview-modal" role="dialog" aria-modal="true" @click.self="closePreview">
+      <button class="preview-close" type="button" aria-label="关闭预览" title="关闭" @click="closePreview">
+        <X :size="28" />
+      </button>
+
+      <div class="preview-shell">
+        <div class="preview-stage">
+          <img :src="mediaUrl(previewImage.image_url)" :alt="previewImage.prompt" />
+        </div>
+
+        <section class="preview-info">
+          <p class="preview-prompt">{{ previewImage.prompt }}</p>
+          <div class="preview-meta">
+            <div class="preview-author">
+              <div class="avatar small" :style="{ background: previewImage.author.avatar_color }">
+                {{ previewImage.author.display_name.slice(0, 1).toUpperCase() }}
+              </div>
+              <div>
+                <strong>{{ previewImage.author.display_name }}</strong>
+                <span>{{ dateOnly(previewImage.created_at) }} {{ timeOnly(previewImage.created_at) }}</span>
+              </div>
+            </div>
+            <div class="preview-actions">
+              <button class="preview-action" type="button" @click="copyPrompt(previewImage)">
+                <Check v-if="copiedPromptId === previewImage.id" :size="17" />
+                <Copy v-else :size="17" />
+                {{ copiedPromptId === previewImage.id ? '已复制提示词' : '复制提示词' }}
+              </button>
+              <a class="preview-action solid" :href="mediaUrl(previewImage.image_url)" target="_blank" rel="noopener noreferrer">
+                <ExternalLink :size="17" />
+                打开原图
+              </a>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div v-if="authModalOpen" class="auth-modal" role="dialog" aria-modal="true" @click.self="closeAuthModal">
+      <form class="auth-dialog" @submit.prevent="submitAuth">
+        <button class="modal-close" type="button" aria-label="关闭登录" @click="closeAuthModal">
+          <X :size="22" />
+        </button>
+        <div class="auth-dialog-head">
+          <div class="avatar guest"><UserRound :size="26" /></div>
+          <div>
+            <h2>{{ authMode === 'login' ? '账号登录' : '创建账号' }}</h2>
+            <p>{{ authMode === 'login' ? '登录后才能提交提示词生成图片' : '注册后即可开始生成和收藏作品' }}</p>
+          </div>
+        </div>
+        <div class="auth-tabs">
+          <button type="button" :class="{ active: authMode === 'login' }" @click="switchAuthMode('login')">登录</button>
+          <button type="button" :class="{ active: authMode === 'register' }" @click="switchAuthMode('register')">注册</button>
+        </div>
+        <label>用户名<input v-model="authForm.username" autocomplete="username" required minlength="3" /></label>
+        <label>密码<input v-model="authForm.password" type="password" :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'" required minlength="6" /></label>
+        <label v-if="authMode === 'register'">昵称<input v-model="authForm.display_name" /></label>
+        <label>
+          图片验证码
+          <div class="captcha-row">
+            <input v-model="authForm.captcha_code" autocomplete="off" inputmode="text" required minlength="4" maxlength="8" placeholder="输入验证码" />
+            <button class="captcha-image" type="button" title="刷新验证码" @click="loadCaptcha">
+              <img v-if="captcha" :src="captcha.image" alt="图片验证码" />
+              <span v-else>刷新</span>
+            </button>
+          </div>
+        </label>
+        <button class="primary-button wide" :disabled="authLoading || !captcha">
+          <UserRound :size="18" /> {{ authLoading ? '处理中' : authMode === 'login' ? '登录' : '注册' }}
+        </button>
+        <p v-if="message" class="message">{{ message }}</p>
+      </form>
+    </div>
   </main>
 </template>

@@ -1,7 +1,7 @@
 services:
   img2gallery:
-    build: .
-    image: img2gallery:local
+    image: ghcr.io/qwisedev/img2gallery:latest
+    pull_policy: always
     ports:
       - "8000:8000"
     env_file:
