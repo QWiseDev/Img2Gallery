@@ -61,6 +61,23 @@ func TestProviderDoRetriesNetworkTimeout(t *testing.T) {
 	}
 }
 
+func TestProviderDoReadsLargeSuccessfulJSON(t *testing.T) {
+	largeImage := strings.Repeat("a", providerErrorBodyLimit+128)
+	client := &ProviderClient{client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"data":[{"b64_json":"`+largeImage+`"}]}`), nil
+	})}}
+	req, _ := http.NewRequest(http.MethodPost, "https://example.test/v1/images/generations", strings.NewReader(`{"prompt":"test"}`))
+
+	payload, err := client.do(req, "生图接口")
+
+	if err != nil {
+		t.Fatalf("do returned error: %v", err)
+	}
+	if payload.Data[0].B64JSON != largeImage {
+		t.Fatalf("large b64 payload was truncated")
+	}
+}
+
 func TestProviderDoDoesNotRetryBadRequest(t *testing.T) {
 	stubRetryDelay(t)
 	calls := 0

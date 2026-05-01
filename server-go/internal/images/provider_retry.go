@@ -11,7 +11,10 @@ import (
 
 const providerAttempts = 3
 
-const providerDialTimeout = 60 * time.Second
+const (
+	providerDialTimeout    = 60 * time.Second
+	providerErrorBodyLimit = 1 << 20
+)
 
 var providerRetryDelay = func(attempt int) time.Duration {
 	return time.Duration(attempt-1) * time.Second

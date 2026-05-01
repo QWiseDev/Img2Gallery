@@ -104,14 +104,19 @@ func (c *ProviderClient) do(req *http.Request, label string) (*imageResponse, er
 			}
 			return nil, lastErr
 		}
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		_ = resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, providerErrorBodyLimit))
+			_ = resp.Body.Close()
 			lastErr = providerStatusError(label, resp.Status, raw)
 			if shouldRetryProviderStatus(resp.StatusCode, attempt) {
 				continue
 			}
 			return nil, lastErr
+		}
+		raw, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, errors.New(label + "返回读取失败")
 		}
 		var payload imageResponse
 		if err := json.Unmarshal(raw, &payload); err != nil {
