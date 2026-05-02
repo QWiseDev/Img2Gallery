@@ -157,9 +157,12 @@ async function submitAuth() {
   message.value = ''
   try {
     const payload = {
-      ...authForm.value,
+      username: authForm.value.username,
+      password: authForm.value.password,
+      captcha_code: authForm.value.captcha_code,
       captcha_token: captcha.value?.token || '',
     }
+    if (authMode.value === 'register') payload.display_name = authForm.value.display_name
     user.value = authMode.value === 'login' ? await api.login(payload) : await api.register(payload)
     authForm.value = { username: '', password: '', display_name: '', captcha_code: '' }
     authModalOpen.value = false
