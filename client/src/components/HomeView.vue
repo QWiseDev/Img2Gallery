@@ -36,12 +36,12 @@ const sourceFile = ref(null)
 const sourcePreview = ref('')
 const images = ref([])
 const myImages = ref([])
+const activeTab = ref('gallery')
 const sort = ref('latest')
 const loading = ref(true)
 const galleryLoadingMore = ref(false)
 const galleryHasMore = ref(true)
 const galleryOffset = ref(0)
-const recordsOpen = ref(false)
 const recordsLoaded = ref(false)
 const recordsLoading = ref(false)
 const recordsHasMore = ref(true)
@@ -163,11 +163,11 @@ async function submitAuth() {
     user.value = authMode.value === 'login' ? await api.login(payload) : await api.register(payload)
     authForm.value = { username: '', password: '', display_name: '', captcha_code: '' }
     authModalOpen.value = false
-    recordsOpen.value = false
     recordsLoaded.value = false
     myImages.value = []
     await refreshAdminAccess()
     await loadImages(true)
+    if (activeTab.value === 'records') await loadMyImages(true)
   } catch (error) {
     message.value = error.message
     authForm.value.captcha_code = ''
@@ -182,10 +182,10 @@ async function logout() {
   await api.logout()
   user.value = null
   adminAccess.value = false
+  activeTab.value = 'gallery'
   sort.value = 'latest'
   queueState.value = null
   myImages.value = []
-  recordsOpen.value = false
   recordsLoaded.value = false
   recordsOffset.value = 0
   recordsHasMore.value = true
@@ -293,14 +293,20 @@ async function setSort(nextSort) {
 }
 
 function handleGalleryScroll() {
+  if (activeTab.value !== 'gallery') return
   const documentHeight = document.documentElement.scrollHeight
   const currentBottom = window.scrollY + window.innerHeight
   if (documentHeight - currentBottom < 700) loadImages(false)
 }
 
-async function toggleRecords() {
-  recordsOpen.value = !recordsOpen.value
-  if (recordsOpen.value && !recordsLoaded.value) await loadMyImages(true)
+async function selectTab(tab) {
+  activeTab.value = tab
+  message.value = ''
+  if (tab === 'records' && user.value && !recordsLoaded.value) await loadMyImages(true)
+}
+
+function openCreateEntry() {
+  selectTab('create')
 }
 
 function mergeImages(current, nextRows) {
@@ -460,133 +466,154 @@ function taskLabel(taskType) {
 </script>
 
 <template>
-  <main class="page-shell">
-    <div class="mobile-auth-actions">
-      <template v-if="user">
-        <button class="mobile-auth-button user" type="button" :title="user.display_name" :aria-label="user.display_name">
-          <span class="avatar tiny" :style="{ background: user.avatar_color }">{{ user.display_name.slice(0, 1).toUpperCase() }}</span>
-        </button>
-        <button class="mobile-auth-button" type="button" title="退出登录" aria-label="退出登录" @click="logout">
-          <LogOut :size="18" />
+  <main class="page-shell home-workbench">
+    <header class="app-topbar">
+      <div class="brand-lockup">
+        <span class="brand-mark"><Sparkles :size="18" /></span>
+        <div>
+          <strong>Img2Gallery</strong>
+          <span>AI Prompt Gallery</span>
+        </div>
+      </div>
+      <nav class="topbar-nav" aria-label="首页导航">
+        <button type="button" :class="{ active: activeTab === 'create' }" @click="selectTab('create')">生成</button>
+        <button type="button" :class="{ active: activeTab === 'gallery' }" @click="selectTab('gallery')">画廊</button>
+        <button type="button" :class="{ active: activeTab === 'records' }" @click="selectTab('records')">记录</button>
+      </nav>
+      <div class="studio-actions topbar-actions">
+        <template v-if="user">
+          <div class="user-chip" :title="user.username">
+            <span class="avatar tiny" :style="{ background: user.avatar_color }">{{ user.display_name.slice(0, 1).toUpperCase() }}</span>
+            <strong>{{ user.display_name }}</strong>
+          </div>
+          <button class="header-icon-button" type="button" title="退出登录" aria-label="退出登录" @click="logout">
+            <LogOut :size="18" />
+          </button>
+        </template>
+        <template v-else>
+          <button class="header-icon-button" type="button" title="登录" aria-label="登录" @click="openAuthModal('login')">
+            <LogIn :size="18" />
+          </button>
+          <button class="header-icon-button accent" type="button" title="注册" aria-label="注册" @click="openAuthModal('register')">
+            <UserPlus :size="18" />
+          </button>
+        </template>
+      </div>
+    </header>
+
+    <section v-if="activeTab === 'create' && !user" class="create-panel tab-empty-panel">
+      <div class="empty-state">
+        <UserRound :size="26" />
+        登录后才能使用生成图片功能
+      </div>
+      <button class="primary-button wide" type="button" @click="openAuthModal('login')">
+        <LogIn :size="18" />
+        登录账号
+      </button>
+    </section>
+
+    <section v-else-if="activeTab === 'create'" id="create" class="workbench-console">
+        <div class="console-main">
+          <div class="studio-header">
+            <div>
+              <div class="kicker">Creative Console</div>
+              <h1>输入提示词，开始生成</h1>
+              <p class="section-subtitle">生成和编辑都在这里完成，结果自动进入本地画廊。</p>
+            </div>
+            <div class="console-status-strip" aria-label="运行摘要">
+              <span><strong>{{ images.length }}</strong>作品</span>
+              <span><strong>{{ stats.ready }}</strong>完成</span>
+              <span><strong>{{ stats.likes }}</strong>点赞</span>
+              <span><strong>{{ currentName }}</strong>身份</span>
+            </div>
+          </div>
+
+          <div class="create-panel command-panel">
+            <div class="section-heading">
+              <div>
+                <h2>{{ createMode === 'edit' ? '编辑图片' : '生成图片' }}</h2>
+                <p class="section-subtitle">{{ user ? '提示词越具体，画面越稳定。' : '登录后才能提交任务。' }}</p>
+              </div>
+              <div class="mode-switch" role="tablist" aria-label="创作模式">
+                <button type="button" :class="{ active: createMode === 'generate' }" :disabled="generating" @click="setCreateMode('generate')">
+                  <WandSparkles :size="16" /> 生成
+                </button>
+                <button type="button" :class="{ active: createMode === 'edit' }" :disabled="generating" @click="setCreateMode('edit')">
+                  <ImagePlus :size="16" /> 编辑
+                </button>
+              </div>
+            </div>
+            <label v-if="createMode === 'edit'" class="upload-box" :class="{ filled: sourcePreview }">
+              <input type="file" accept="image/png,image/jpeg,image/webp" :disabled="generating" @change="handleSourceFile" />
+              <template v-if="sourcePreview">
+                <img :src="sourcePreview" alt="待编辑原图预览" />
+                <span>更换图片</span>
+              </template>
+              <template v-else>
+                <UploadCloud :size="28" />
+                <strong>上传需要编辑的图片</strong>
+                <small>支持 PNG、JPG、WEBP，最大 10MB</small>
+              </template>
+            </label>
+            <button v-if="sourcePreview && !generating" class="ghost-button compact clear-upload" type="button" @click="clearSourceImage">
+              <Trash2 :size="16" /> 移除原图
+            </button>
+            <textarea
+              v-model="prompt"
+              :placeholder="createMode === 'edit' ? '描述你希望如何修改这张图片...' : '描绘你心中的画面（支持详细的提示词）...'"
+              :disabled="generating"
+            ></textarea>
+            <div v-if="queueState" class="queue-card">
+              <strong>{{ queueText() }}</strong>
+              <span>队列 {{ queueState.queue.queued }} · 生成中 {{ queueState.queue.running }}</span>
+            </div>
+            <div class="create-footer">
+              <label><input type="checkbox" checked disabled />成功结果会保存到本地，并展示在公共画廊。</label>
+              <button class="primary-button" :disabled="generating" @click="submitImageJob">
+                <RefreshCw v-if="generating" class="spin" :size="18" />
+                <WandSparkles v-else :size="18" />
+                {{ generating ? '等待结果' : user ? (createMode === 'edit' ? '提交编辑' : '立即生成') : '登录后提交' }}
+              </button>
+            </div>
+            <p v-if="message" class="message">{{ message }}</p>
+          </div>
+        </div>
+
+        <aside class="console-rail">
+          <div class="rail-card live">
+            <span class="pill success"><span></span> API 就绪</span>
+            <strong>{{ queueState ? queueText() : '等待新的创作任务' }}</strong>
+            <small>{{ queueState ? `队列 ${queueState.queue.queued} · 生成中 ${queueState.queue.running}` : '提交后会实时显示排队位置' }}</small>
+          </div>
+          <button v-if="user" class="rail-record-button" type="button" @click="selectTab('records')">
+            <ChevronDown :size="17" />
+            查看我的记录
+          </button>
+        </aside>
+    </section>
+
+    <section v-if="activeTab === 'records'" class="records-section">
+      <template v-if="!user">
+        <div class="empty-state">
+          <UserRound :size="26" />
+          登录后查看你的生成记录
+        </div>
+        <button class="primary-button wide" type="button" @click="openAuthModal('login')">
+          <LogIn :size="18" />
+          登录账号
         </button>
       </template>
       <template v-else>
-        <button class="mobile-auth-button" type="button" title="登录" aria-label="登录" @click="openAuthModal('login')">
-          <LogIn :size="18" />
-        </button>
-        <button class="mobile-auth-button accent" type="button" title="注册" aria-label="注册" @click="openAuthModal('register')">
-          <UserPlus :size="18" />
-        </button>
-      </template>
-    </div>
-
-    <section class="studio-grid">
-      <div class="studio-main">
-        <header class="studio-header">
-          <div>
-            <div class="kicker">AI Prompt Gallery</div>
-            <h1>AI 生图工作台</h1>
-          </div>
-          <div class="studio-actions">
-            <span class="pill success"><span></span> API 就绪</span>
-            <template v-if="user">
-              <div class="user-chip" :title="user.username">
-                <span class="avatar tiny" :style="{ background: user.avatar_color }">{{ user.display_name.slice(0, 1).toUpperCase() }}</span>
-                <strong>{{ user.display_name }}</strong>
-              </div>
-              <button class="header-icon-button" type="button" title="退出登录" aria-label="退出登录" @click="logout">
-                <LogOut :size="18" />
-              </button>
-            </template>
-            <template v-else>
-              <button class="header-icon-button" type="button" @click="openAuthModal('login')">
-                <LogIn :size="18" /> 登录
-              </button>
-              <button class="header-icon-button accent" type="button" @click="openAuthModal('register')">
-                <UserPlus :size="18" /> 注册
-              </button>
-            </template>
-          </div>
-        </header>
-
-        <div class="create-panel command-panel">
-          <div class="section-heading">
-            <div>
-              <h2>创作指令</h2>
-              <p class="section-subtitle">输入提示词，选择生成或上传图片编辑。</p>
-            </div>
-            <div class="mode-switch" role="tablist" aria-label="创作模式">
-            <button type="button" :class="{ active: createMode === 'generate' }" :disabled="generating" @click="setCreateMode('generate')">
-              <WandSparkles :size="16" /> 生成
-            </button>
-            <button type="button" :class="{ active: createMode === 'edit' }" :disabled="generating" @click="setCreateMode('edit')">
-              <ImagePlus :size="16" /> 编辑
-            </button>
-            </div>
-          </div>
-          <label v-if="createMode === 'edit'" class="upload-box" :class="{ filled: sourcePreview }">
-            <input type="file" accept="image/png,image/jpeg,image/webp" :disabled="generating" @change="handleSourceFile" />
-            <template v-if="sourcePreview">
-              <img :src="sourcePreview" alt="待编辑原图预览" />
-              <span>更换图片</span>
-            </template>
-            <template v-else>
-              <UploadCloud :size="28" />
-              <strong>上传需要编辑的图片</strong>
-              <small>支持 PNG、JPG、WEBP，最大 10MB</small>
-            </template>
-          </label>
-          <button v-if="sourcePreview && !generating" class="ghost-button compact clear-upload" type="button" @click="clearSourceImage">
-            <Trash2 :size="16" /> 移除原图
-          </button>
-          <textarea
-            v-model="prompt"
-            :placeholder="createMode === 'edit' ? '描述你希望如何修改这张图片...' : '描绘你心中的画面（支持详细的提示词）...'"
-            :disabled="generating"
-          ></textarea>
-          <div v-if="queueState" class="queue-card">
-            <strong>{{ queueText() }}</strong>
-            <span>队列 {{ queueState.queue.queued }} · 生成中 {{ queueState.queue.running }}</span>
-          </div>
-          <div class="create-footer">
-            <label><input type="checkbox" checked disabled />成功结果会保存到本地，并展示在公共画廊。</label>
-            <button class="primary-button" :disabled="generating" @click="submitImageJob">
-              <RefreshCw v-if="generating" class="spin" :size="18" />
-              <WandSparkles v-else :size="18" />
-              {{ generating ? '等待结果' : user ? (createMode === 'edit' ? '提交编辑' : '立即生成') : '登录后提交' }}
+        <div class="section-heading">
+          <h2>我的生成记录</h2>
+          <div class="records-actions">
+            <button class="ghost-button compact" :disabled="recordsLoading" @click="loadMyImages(true)">刷新</button>
+            <button class="ghost-button compact collapse-toggle active" @click="selectTab('gallery')">
+              <ChevronDown :size="17" />
+              返回画廊
             </button>
           </div>
-          <p v-if="message" class="message">{{ message }}</p>
         </div>
-      </div>
-
-      <aside class="studio-side">
-        <aside class="status-panel">
-          <div class="status-title">
-            <h2>运行状态</h2>
-          </div>
-          <div class="stat-grid">
-            <div><small>作品</small><strong>{{ images.length }}</strong></div>
-            <div><small>完成</small><strong>{{ stats.ready }}</strong></div>
-            <div><small>点赞</small><strong>{{ stats.likes }}</strong></div>
-            <div><small>身份</small><strong class="identity">{{ currentName }}</strong></div>
-          </div>
-        </aside>
-      </aside>
-    </section>
-
-    <section v-if="user" class="records-section">
-      <div class="section-heading">
-        <h2>我的生成记录</h2>
-        <div class="records-actions">
-          <button v-if="recordsOpen" class="ghost-button compact" :disabled="recordsLoading" @click="loadMyImages(true)">刷新</button>
-          <button class="ghost-button compact collapse-toggle" :class="{ active: recordsOpen }" @click="toggleRecords">
-            <ChevronDown :size="17" />
-            {{ recordsOpen ? '收起' : '展开' }}
-          </button>
-        </div>
-      </div>
-      <template v-if="recordsOpen">
         <div v-if="recordsLoading && myImages.length === 0" class="empty-state small-empty">正在加载生成记录</div>
         <div v-else-if="recordsLoaded && myImages.length === 0" class="empty-state small-empty">暂无生成记录</div>
         <div v-else class="records-list">
@@ -618,13 +645,22 @@ function taskLabel(taskType) {
       </template>
     </section>
 
-    <section class="gallery-section">
+    <section v-if="activeTab === 'gallery'" id="gallery" class="gallery-section">
       <div class="section-heading">
-        <h2>社区画廊</h2>
-        <div class="segmented">
-          <button :class="{ active: sort === 'latest' }" @click="setSort('latest')">最新生成</button>
-          <button :class="{ active: sort === 'popular' }" @click="setSort('popular')">最多点赞</button>
-          <button :class="{ active: sort === 'favorites' }" @click="setSort('favorites')">我的收藏</button>
+        <div>
+          <h2>灵感流</h2>
+          <p class="section-subtitle">{{ sortedLabel }} · 下滑自动加载更多作品</p>
+        </div>
+        <div class="gallery-heading-actions">
+          <div class="segmented" :class="{ 'two-options': !user }">
+            <button :class="{ active: sort === 'latest' }" @click="setSort('latest')">最新生成</button>
+            <button :class="{ active: sort === 'popular' }" @click="setSort('popular')">最多点赞</button>
+            <button v-if="user" :class="{ active: sort === 'favorites' }" @click="setSort('favorites')">我的收藏</button>
+          </div>
+          <button class="primary-button compact create-entry-button" type="button" @click="openCreateEntry">
+            <WandSparkles :size="17" />
+            {{ user ? '生成图片' : '登录后生成' }}
+          </button>
         </div>
       </div>
 
