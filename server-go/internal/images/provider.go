@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,26 +37,34 @@ func NewProviderClient(cfg config.Config) *ProviderClient {
 	return &ProviderClient{cfg: cfg, client: newProviderHTTPClient()}
 }
 
-func (c *ProviderClient) GenerateAndStore(prompt string, provider Provider) (string, error) {
+func (c *ProviderClient) GenerateAndStore(prompt string, params GenerationParams, provider Provider) (string, error) {
 	if err := validateProvider(provider); err != nil {
 		return "", err
 	}
-	payload := map[string]any{"model": provider.Model, "prompt": prompt, "n": 1, "response_format": "b64_json"}
+	params = NormalizeParams(params)
+	payload := map[string]any{
+		"model":           provider.Model,
+		"prompt":          prompt,
+		"n":               1,
+		"response_format": "b64_json",
+	}
+	applyRequestParams(payload, params)
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequest(http.MethodPost, strings.TrimRight(provider.APIBase, "/")+"/v1/images/generations", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
-	imageBytes, suffix, err := c.requestImage(req, "生图接口")
+	imageBytes, suffix, err := c.requestImage(req, "生图接口", params.OutputFormat)
 	if err != nil {
 		return "", err
 	}
 	return c.storeImageBytes(imageBytes, suffix)
 }
 
-func (c *ProviderClient) EditAndStore(prompt, sourceImagePath string, provider Provider) (string, error) {
+func (c *ProviderClient) EditAndStore(prompt, sourceImagePath string, params GenerationParams, provider Provider) (string, error) {
 	if err := validateProvider(provider); err != nil {
 		return "", err
 	}
+	params = NormalizeParams(params)
 	sourcePath, err := c.resolveSourceImage(sourceImagePath)
 	if err != nil {
 		return "", err
@@ -65,6 +74,7 @@ func (c *ProviderClient) EditAndStore(prompt, sourceImagePath string, provider P
 	_ = writer.WriteField("model", provider.Model)
 	_ = writer.WriteField("prompt", prompt)
 	_ = writer.WriteField("n", "1")
+	writeMultipartParams(writer, params)
 	if err := addFilePart(writer, "image", sourcePath); err != nil {
 		return "", err
 	}
@@ -72,14 +82,14 @@ func (c *ProviderClient) EditAndStore(prompt, sourceImagePath string, provider P
 	req, _ := http.NewRequest(http.MethodPost, strings.TrimRight(provider.APIBase, "/")+"/v1/images/edits", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
-	imageBytes, suffix, err := c.requestImage(req, "图片编辑接口")
+	imageBytes, suffix, err := c.requestImage(req, "图片编辑接口", params.OutputFormat)
 	if err != nil {
 		return "", err
 	}
 	return c.storeImageBytes(imageBytes, suffix)
 }
 
-func (c *ProviderClient) requestImage(req *http.Request, label string) ([]byte, string, error) {
+func (c *ProviderClient) requestImage(req *http.Request, label, outputFormat string) ([]byte, string, error) {
 	var lastErr error
 	for attempt := 1; attempt <= providerAttempts; attempt++ {
 		if attempt > 1 {
@@ -92,7 +102,7 @@ func (c *ProviderClient) requestImage(req *http.Request, label string) ([]byte, 
 		if err != nil {
 			return nil, "", err
 		}
-		imageBytes, suffix, err := c.extractImage(response)
+		imageBytes, suffix, err := c.extractImage(response, outputFormat)
 		if err == nil {
 			return imageBytes, suffix, nil
 		}
@@ -144,7 +154,7 @@ func (c *ProviderClient) do(req *http.Request, label string) (*imageResponse, er
 	return nil, lastErr
 }
 
-func (c *ProviderClient) extractImage(payload *imageResponse) ([]byte, string, error) {
+func (c *ProviderClient) extractImage(payload *imageResponse, outputFormat string) ([]byte, string, error) {
 	if payload == nil || len(payload.Data) == 0 {
 		return nil, "", errNoImageData
 	}
@@ -154,12 +164,59 @@ func (c *ProviderClient) extractImage(payload *imageResponse) ([]byte, string, e
 		if err != nil {
 			return nil, "", errors.New("生图接口返回图片解码失败")
 		}
-		return data, ".png", nil
+		return data, suffixFromOutputFormat(outputFormat), nil
 	}
 	if first.URL != "" {
 		return c.downloadImage(first.URL)
 	}
 	return nil, "", errors.New("不支持的生图接口返回格式")
+}
+
+func applyRequestParams(payload map[string]any, params GenerationParams) {
+	if params.Size != "auto" {
+		payload["size"] = params.Size
+	}
+	if params.Quality != "auto" {
+		payload["quality"] = params.Quality
+	}
+	if params.OutputFormat != "png" {
+		payload["output_format"] = params.OutputFormat
+	}
+	if params.OutputCompression != nil && params.OutputFormat != "png" {
+		payload["output_compression"] = *params.OutputCompression
+	}
+	if params.Moderation != "auto" {
+		payload["moderation"] = params.Moderation
+	}
+}
+
+func writeMultipartParams(writer *multipart.Writer, params GenerationParams) {
+	if params.Size != "auto" {
+		_ = writer.WriteField("size", params.Size)
+	}
+	if params.Quality != "auto" {
+		_ = writer.WriteField("quality", params.Quality)
+	}
+	if params.OutputFormat != "png" {
+		_ = writer.WriteField("output_format", params.OutputFormat)
+	}
+	if params.OutputCompression != nil && params.OutputFormat != "png" {
+		_ = writer.WriteField("output_compression", strconv.Itoa(*params.OutputCompression))
+	}
+	if params.Moderation != "auto" {
+		_ = writer.WriteField("moderation", params.Moderation)
+	}
+}
+
+func suffixFromOutputFormat(format string) string {
+	switch format {
+	case "jpeg":
+		return ".jpg"
+	case "webp":
+		return ".webp"
+	default:
+		return ".png"
+	}
 }
 
 func (c *ProviderClient) downloadImage(url string) ([]byte, string, error) {

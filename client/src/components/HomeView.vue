@@ -32,6 +32,20 @@ const authModalOpen = ref(false)
 const captcha = ref(null)
 const prompt = ref('')
 const createMode = ref('generate')
+const generationParams = ref({
+  size: 'auto',
+  quality: 'auto',
+  output_format: 'png',
+  output_compression: null,
+  moderation: 'auto',
+})
+const sizePickerOpen = ref(false)
+const sizeMode = ref('auto')
+const sizeTier = ref('1K')
+const sizeRatio = ref('1:1')
+const customRatio = ref('16:9')
+const customWidth = ref('1024')
+const customHeight = ref('1024')
 const sourceFile = ref(null)
 const sourcePreview = ref('')
 const images = ref([])
@@ -68,6 +82,29 @@ const sortedLabel = computed(() => {
   if (sort.value === 'popular') return '最多点赞'
   if (sort.value === 'favorites') return '我的收藏'
   return '最新生成'
+})
+const compressionDisabled = computed(() => generationParams.value.output_format === 'png')
+const ratioOptions = [
+  '1:1',
+  '3:2',
+  '2:3',
+  '16:9',
+  '9:16',
+  '4:3',
+  '3:4',
+  '21:9',
+]
+const displayedSize = computed(() => normalizeImageSize(generationParams.value.size || 'auto') || 'auto')
+const previewSize = computed(() => {
+  if (sizeMode.value === 'auto') return 'auto'
+  if (sizeMode.value === 'ratio') {
+    const ratio = sizeRatio.value === 'custom' ? customRatio.value : sizeRatio.value
+    return calculateImageSize(sizeTier.value, ratio)
+  }
+  const width = Number(customWidth.value)
+  const height = Number(customHeight.value)
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return ''
+  return normalizeImageSize(`${width}x${height}`)
 })
 
 onMounted(() => {
@@ -213,10 +250,11 @@ async function submitImageJob() {
   message.value = ''
   try {
     const cleanPrompt = prompt.value.trim()
+    const params = normalizedGenerationParams()
     const created =
       createMode.value === 'edit'
-        ? await api.editImage(cleanPrompt, sourceFile.value)
-        : await api.createImage(cleanPrompt)
+        ? await api.editImage(cleanPrompt, sourceFile.value, params)
+        : await api.createImage(cleanPrompt, params)
     images.value = [created, ...images.value.filter((item) => item.id !== created.id)]
     myImages.value = [created, ...myImages.value.filter((item) => item.id !== created.id)]
     prompt.value = ''
@@ -232,6 +270,128 @@ function setCreateMode(mode) {
   if (generating.value) return
   createMode.value = mode
   message.value = ''
+}
+
+function openSizePicker() {
+  if (generating.value) return
+  const size = generationParams.value.size || 'auto'
+  const preset = findSizePreset(size)
+  const parsed = parseSize(size)
+  sizePickerOpen.value = true
+  if (size === 'auto') {
+    sizeMode.value = 'auto'
+  } else if (preset) {
+    sizeMode.value = 'ratio'
+    sizeTier.value = preset.tier
+    sizeRatio.value = preset.ratio
+  } else if (parsed) {
+    sizeMode.value = 'resolution'
+    customWidth.value = String(parsed.width)
+    customHeight.value = String(parsed.height)
+  } else {
+    sizeMode.value = 'auto'
+  }
+}
+
+function applySize() {
+  if (!previewSize.value) return
+  generationParams.value.size = previewSize.value
+  sizePickerOpen.value = false
+}
+
+function parseSize(size) {
+  const match = String(size).match(/^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/)
+  if (!match) return null
+  return { width: Number(match[1]), height: Number(match[2]) }
+}
+
+function parseRatio(value) {
+  const match = String(value).match(/^\s*(\d+(?:\.\d+)?)\s*[:xX×]\s*(\d+(?:\.\d+)?)\s*$/)
+  if (!match) return null
+  const width = Number(match[1])
+  const height = Number(match[2])
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null
+  return { width, height }
+}
+
+function calculateImageSize(tier, ratio) {
+  const parsed = parseRatio(ratio)
+  if (!parsed) return ''
+  const base = tier === '4K' ? 3840 : tier === '2K' ? 2048 : 1024
+  const { width: ratioWidth, height: ratioHeight } = parsed
+  if (ratioWidth === ratioHeight) return normalizeImageSize(`${base}x${base}`)
+  if (tier === '1K') {
+    const shortSide = 1024
+    const width = ratioWidth > ratioHeight ? roundToMultiple(shortSide * ratioWidth / ratioHeight, 16) : shortSide
+    const height = ratioWidth > ratioHeight ? shortSide : roundToMultiple(shortSide * ratioHeight / ratioWidth, 16)
+    return normalizeImageSize(`${width}x${height}`)
+  }
+  const width = ratioWidth > ratioHeight ? base : roundToMultiple(base * ratioWidth / ratioHeight, 16)
+  const height = ratioWidth > ratioHeight ? roundToMultiple(base * ratioHeight / ratioWidth, 16) : base
+  return normalizeImageSize(`${width}x${height}`)
+}
+
+function normalizeImageSize(size) {
+  if (!size || size === 'auto') return 'auto'
+  const parsed = parseSize(size)
+  if (!parsed) return ''
+  let width = roundToMultiple(parsed.width, 16)
+  let height = roundToMultiple(parsed.height, 16)
+  for (let i = 0; i < 4; i += 1) {
+    const maxEdge = Math.max(width, height)
+    if (maxEdge > 3840) {
+      const scale = 3840 / maxEdge
+      width = floorToMultiple(width * scale, 16)
+      height = floorToMultiple(height * scale, 16)
+    }
+    if (width / height > 3) width = floorToMultiple(height * 3, 16)
+    if (height / width > 3) height = floorToMultiple(width * 3, 16)
+    const pixels = width * height
+    if (pixels > 8294400) {
+      const scale = Math.sqrt(8294400 / pixels)
+      width = floorToMultiple(width * scale, 16)
+      height = floorToMultiple(height * scale, 16)
+    }
+    if (pixels < 655360) {
+      const scale = Math.sqrt(655360 / pixels)
+      width = ceilToMultiple(width * scale, 16)
+      height = ceilToMultiple(height * scale, 16)
+    }
+  }
+  return `${width}x${height}`
+}
+
+function findSizePreset(size) {
+  const normalized = normalizeImageSize(size)
+  for (const tier of ['1K', '2K', '4K']) {
+    for (const ratio of ratioOptions) {
+      if (calculateImageSize(tier, ratio) === normalized) return { tier, ratio }
+    }
+  }
+  return null
+}
+
+function roundToMultiple(value, multiple) {
+  return Math.max(multiple, Math.round(value / multiple) * multiple)
+}
+
+function floorToMultiple(value, multiple) {
+  return Math.max(multiple, Math.floor(value / multiple) * multiple)
+}
+
+function ceilToMultiple(value, multiple) {
+  return Math.max(multiple, Math.ceil(value / multiple) * multiple)
+}
+
+function normalizedGenerationParams() {
+  const params = { ...generationParams.value }
+  params.size = normalizeImageSize(params.size) || 'auto'
+  if (params.output_format === 'png') params.output_compression = null
+  if (params.output_compression !== null) {
+    const value = Number(params.output_compression)
+    params.output_compression = Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : null
+  }
+  return params
 }
 
 function handleSourceFile(event) {
@@ -273,7 +433,8 @@ function watchJob(id) {
       generating.value = false
       closeEvents()
       await loadImages(true)
-      if (recordsLoaded.value) await loadMyImages(true)
+      if (recordsLoaded.value || activeTab.value === 'create') await loadMyImages(true)
+      if (payload.status === 'ready') message.value = `${payload.image?.task_type === 'edit' ? '编辑' : '生成'}完成，已上传到画廊`
     }
   }
   eventSource.onerror = () => {
@@ -305,6 +466,7 @@ function handleGalleryScroll() {
 async function selectTab(tab) {
   activeTab.value = tab
   message.value = ''
+  if (tab === 'create' && user.value && !recordsLoaded.value) await loadMyImages(true)
   if (tab === 'records' && user.value && !recordsLoaded.value) await loadMyImages(true)
 }
 
@@ -479,9 +641,8 @@ function taskLabel(taskType) {
         </div>
       </div>
       <nav class="topbar-nav" aria-label="首页导航">
-        <button type="button" :class="{ active: activeTab === 'create' }" @click="selectTab('create')">生成</button>
         <button type="button" :class="{ active: activeTab === 'gallery' }" @click="selectTab('gallery')">画廊</button>
-        <button type="button" :class="{ active: activeTab === 'records' }" @click="selectTab('records')">记录</button>
+        <button type="button" :class="{ active: activeTab === 'create' }" @click="selectTab('create')">我的</button>
       </nav>
       <div class="studio-actions topbar-actions">
         <template v-if="user">
@@ -507,7 +668,7 @@ function taskLabel(taskType) {
     <section v-if="activeTab === 'create' && !user" class="create-panel tab-empty-panel">
       <div class="empty-state">
         <UserRound :size="26" />
-        登录后才能使用生成图片功能
+        登录后进入我的生成工作台
       </div>
       <button class="primary-button wide" type="button" @click="openAuthModal('login')">
         <LogIn :size="18" />
@@ -515,84 +676,171 @@ function taskLabel(taskType) {
       </button>
     </section>
 
-    <section v-else-if="activeTab === 'create'" id="create" class="workbench-console">
-        <div class="console-main">
-          <div class="studio-header">
-            <div>
-              <div class="kicker">Creative Console</div>
-              <h1>输入提示词，开始生成</h1>
-              <p class="section-subtitle">生成和编辑都在这里完成，结果自动进入本地画廊。</p>
-            </div>
-            <div class="console-status-strip" aria-label="运行摘要">
-              <span><strong>{{ images.length }}</strong>作品</span>
-              <span><strong>{{ stats.ready }}</strong>完成</span>
-              <span><strong>{{ stats.likes }}</strong>点赞</span>
-              <span><strong>{{ currentName }}</strong>身份</span>
-            </div>
-          </div>
+    <section v-else-if="activeTab === 'create'" id="create" class="playground-shell">
+      <div class="playground-header">
+        <div>
+          <div class="kicker">GPT Image Playground</div>
+          <h1>我的工作台</h1>
+          <p class="section-subtitle">在这里生成或编辑图片，完成后会自动进入公共画廊。</p>
+        </div>
+        <div class="playground-header-actions">
+          <span class="pill success"><span></span>{{ queueState ? queueText() : '准备就绪' }}</span>
+          <button class="ghost-button compact" type="button" @click="selectTab('gallery')">
+            <ExternalLink :size="16" />
+            查看画廊
+          </button>
+        </div>
+      </div>
 
-          <div class="create-panel command-panel">
-            <div class="section-heading">
-              <div>
-                <h2>{{ createMode === 'edit' ? '编辑图片' : '生成图片' }}</h2>
-                <p class="section-subtitle">{{ user ? '提示词越具体，画面越稳定。' : '登录后才能提交任务。' }}</p>
-              </div>
-              <div class="mode-switch" role="tablist" aria-label="创作模式">
-                <button type="button" :class="{ active: createMode === 'generate' }" :disabled="generating" @click="setCreateMode('generate')">
-                  <WandSparkles :size="16" /> 生成
-                </button>
-                <button type="button" :class="{ active: createMode === 'edit' }" :disabled="generating" @click="setCreateMode('edit')">
-                  <ImagePlus :size="16" /> 编辑
-                </button>
-              </div>
+      <div class="playground-grid">
+        <article class="playground-stat">
+          <small>作品</small>
+          <strong>{{ images.length }}</strong>
+        </article>
+        <article class="playground-stat">
+          <small>完成</small>
+          <strong>{{ stats.ready }}</strong>
+        </article>
+        <article class="playground-stat">
+          <small>点赞</small>
+          <strong>{{ stats.likes }}</strong>
+        </article>
+        <article class="playground-stat">
+          <small>身份</small>
+          <strong>{{ currentName }}</strong>
+        </article>
+      </div>
+
+      <div v-if="queueState" class="playground-progress">
+        <strong>{{ queueText() }}</strong>
+        <span>队列 {{ queueState.queue.queued }} · 生成中 {{ queueState.queue.running }}</span>
+      </div>
+
+      <div v-if="recordsLoading && myImages.length === 0" class="playground-empty">
+        <RefreshCw class="spin" :size="28" />
+        正在同步你的生成记录
+      </div>
+      <div v-else-if="myImages.length === 0" class="playground-empty">
+        <ImagePlus :size="34" />
+        <strong>输入提示词开始生成图片</strong>
+        <span>生成成功后会自动保存，并展示在画廊顶部。</span>
+      </div>
+      <div v-else class="playground-task-grid">
+        <article v-for="item in myImages.slice(0, 9)" :key="item.id" class="playground-task-card">
+          <button v-if="item.status === 'ready'" class="playground-task-image" type="button" @click="openPreview(item)">
+            <img :src="mediaUrl(item.image_url)" :alt="item.prompt" />
+          </button>
+          <div v-else class="playground-task-image muted">
+            <RefreshCw v-if="item.status === 'running' || item.status === 'queued'" class="spin" :size="22" />
+            <X v-else :size="22" />
+            <span>{{ statusLabel(item.status) }}</span>
+          </div>
+          <div class="playground-task-body">
+            <div>
+              <strong>#{{ item.id }} · {{ taskLabel(item.task_type) }}</strong>
+              <span>{{ item.completed_at || item.created_at }}</span>
             </div>
-            <label v-if="createMode === 'edit'" class="upload-box" :class="{ filled: sourcePreview }">
-              <input type="file" accept="image/png,image/jpeg,image/webp" :disabled="generating" @change="handleSourceFile" />
-              <template v-if="sourcePreview">
-                <img :src="sourcePreview" alt="待编辑原图预览" />
-                <span>更换图片</span>
-              </template>
-              <template v-else>
-                <UploadCloud :size="28" />
-                <strong>上传需要编辑的图片</strong>
-                <small>支持 PNG、JPG、WEBP，最大 10MB</small>
-              </template>
-            </label>
-            <button v-if="sourcePreview && !generating" class="ghost-button compact clear-upload" type="button" @click="clearSourceImage">
-              <Trash2 :size="16" /> 移除原图
-            </button>
+            <p>{{ item.prompt }}</p>
+            <em v-if="item.error">{{ item.error }}</em>
+          </div>
+        </article>
+      </div>
+
+      <div class="playground-composer-wrap">
+        <div class="playground-composer">
+          <label v-if="createMode === 'edit'" class="playground-upload" :class="{ filled: sourcePreview }">
+            <input type="file" accept="image/png,image/jpeg,image/webp" :disabled="generating" @change="handleSourceFile" />
+            <template v-if="sourcePreview">
+              <img :src="sourcePreview" alt="待编辑原图预览" />
+              <span>更换参考图</span>
+            </template>
+            <template v-else>
+              <UploadCloud :size="22" />
+              <span>上传需要编辑的图片</span>
+              <small>PNG / JPG / WEBP，最大 10MB</small>
+            </template>
+          </label>
+
+          <div class="playground-composer-main">
             <textarea
               v-model="prompt"
-              :placeholder="createMode === 'edit' ? '描述你希望如何修改这张图片...' : '描绘你心中的画面（支持详细的提示词）...'"
+              :placeholder="createMode === 'edit' ? '描述你希望如何修改这张图片...' : '描述你想生成的图片...'"
               :disabled="generating"
+              @keydown.meta.enter.prevent="submitImageJob"
+              @keydown.ctrl.enter.prevent="submitImageJob"
             ></textarea>
-            <div v-if="queueState" class="queue-card">
-              <strong>{{ queueText() }}</strong>
-              <span>队列 {{ queueState.queue.queued }} · 生成中 {{ queueState.queue.running }}</span>
-            </div>
-            <div class="create-footer">
-              <label><input type="checkbox" checked disabled />成功结果会保存到本地，并展示在公共画廊。</label>
-              <button class="primary-button" :disabled="generating" @click="submitImageJob">
-                <RefreshCw v-if="generating" class="spin" :size="18" />
-                <WandSparkles v-else :size="18" />
-                {{ generating ? '等待结果' : user ? (createMode === 'edit' ? '提交编辑' : '立即生成') : '登录后提交' }}
-              </button>
-            </div>
-            <p v-if="message" class="message">{{ message }}</p>
-          </div>
-        </div>
 
-        <aside class="console-rail">
-          <div class="rail-card live">
-            <span class="pill success"><span></span> API 就绪</span>
-            <strong>{{ queueState ? queueText() : '等待新的创作任务' }}</strong>
-            <small>{{ queueState ? `队列 ${queueState.queue.queued} · 生成中 ${queueState.queue.running}` : '提交后会实时显示排队位置' }}</small>
+            <div class="playground-toolbar">
+              <div class="playground-controls">
+                <div class="mode-switch compact" role="tablist" aria-label="创作模式">
+                  <button type="button" :class="{ active: createMode === 'generate' }" :disabled="generating" @click="setCreateMode('generate')">
+                    <WandSparkles :size="15" /> 生成
+                  </button>
+                  <button type="button" :class="{ active: createMode === 'edit' }" :disabled="generating" @click="setCreateMode('edit')">
+                    <ImagePlus :size="15" /> 编辑
+                  </button>
+                </div>
+                <label class="playground-param">
+                  <span>尺寸</span>
+                  <button class="size-picker-button" type="button" :disabled="generating" @click="openSizePicker">
+                    {{ displayedSize }}
+                  </button>
+                </label>
+                <label class="playground-param">
+                  <span>质量</span>
+                  <select v-model="generationParams.quality" :disabled="generating">
+                    <option value="auto">auto</option>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </select>
+                </label>
+                <label class="playground-param">
+                  <span>格式</span>
+                  <select v-model="generationParams.output_format" :disabled="generating">
+                    <option value="png">PNG</option>
+                    <option value="jpeg">JPEG</option>
+                    <option value="webp">WebP</option>
+                  </select>
+                </label>
+                <label class="playground-param compression">
+                  <span>压缩率</span>
+                  <input
+                    v-model.number="generationParams.output_compression"
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="0-100"
+                    :disabled="generating || compressionDisabled"
+                  />
+                </label>
+                <label class="playground-param">
+                  <span>审核</span>
+                  <select v-model="generationParams.moderation" :disabled="generating">
+                    <option value="auto">auto</option>
+                    <option value="low">low</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="playground-actions">
+                <button v-if="sourcePreview && !generating" class="ghost-button compact" type="button" @click="clearSourceImage">
+                  <Trash2 :size="16" />
+                  移除
+                </button>
+                <button class="primary-button compact" :disabled="generating" type="button" @click="submitImageJob">
+                  <RefreshCw v-if="generating" class="spin" :size="17" />
+                  <WandSparkles v-else :size="17" />
+                  {{ generating ? '等待结果' : createMode === 'edit' ? '提交编辑' : '生成图像' }}
+                </button>
+              </div>
+            </div>
           </div>
-          <button v-if="user" class="rail-record-button" type="button" @click="selectTab('records')">
-            <ChevronDown :size="17" />
-            查看我的记录
-          </button>
-        </aside>
+
+          <p v-if="message" class="message playground-message">{{ message }}</p>
+        </div>
+      </div>
+
     </section>
 
     <section v-if="activeTab === 'records'" class="records-section">
@@ -662,7 +910,7 @@ function taskLabel(taskType) {
           </div>
           <button class="primary-button compact create-entry-button" type="button" @click="openCreateEntry">
             <WandSparkles :size="17" />
-            {{ user ? '生成图片' : '登录后生成' }}
+            {{ user ? '进入我的' : '登录后生成' }}
           </button>
         </div>
       </div>
@@ -813,6 +1061,86 @@ function taskLabel(taskType) {
         </button>
         <p v-if="message" class="message">{{ message }}</p>
       </form>
+    </div>
+
+    <div v-if="sizePickerOpen" class="size-picker-modal" role="dialog" aria-modal="true" @click.self="sizePickerOpen = false">
+      <section class="size-picker-dialog">
+        <div class="size-picker-head">
+          <div>
+            <h2>设置图像尺寸</h2>
+            <p>当前：{{ displayedSize }}</p>
+          </div>
+          <button class="modal-close inline" type="button" aria-label="关闭尺寸选择" @click="sizePickerOpen = false">
+            <X :size="20" />
+          </button>
+        </div>
+
+        <div class="size-mode-tabs">
+          <button type="button" :class="{ active: sizeMode === 'auto' }" @click="sizeMode = 'auto'">自动</button>
+          <button type="button" :class="{ active: sizeMode === 'ratio' }" @click="sizeMode = 'ratio'">按比例</button>
+          <button type="button" :class="{ active: sizeMode === 'resolution' }" @click="sizeMode = 'resolution'">自定义宽高</button>
+        </div>
+
+        <div class="size-picker-body">
+          <div v-if="sizeMode === 'auto'" class="size-auto-panel">
+            <Sparkles :size="30" />
+            <strong>自动尺寸</strong>
+            <span>不传递具体分辨率，由模型决定生成尺寸。</span>
+          </div>
+
+          <template v-else-if="sizeMode === 'ratio'">
+            <label class="size-picker-label">基准分辨率</label>
+            <div class="size-choice-grid three">
+              <button v-for="tier in ['1K', '2K', '4K']" :key="tier" type="button" :class="{ active: sizeTier === tier }" @click="sizeTier = tier">
+                {{ tier }}
+              </button>
+            </div>
+
+            <label class="size-picker-label">图像比例</label>
+            <div class="size-choice-grid four">
+              <button v-for="ratio in ratioOptions" :key="ratio" type="button" :class="{ active: sizeRatio === ratio }" @click="sizeRatio = ratio">
+                {{ ratio }}
+              </button>
+              <button class="wide" type="button" :class="{ active: sizeRatio === 'custom' }" @click="sizeRatio = 'custom'">
+                自定义比例
+              </button>
+            </div>
+
+            <input
+              v-if="sizeRatio === 'custom'"
+              v-model="customRatio"
+              class="size-custom-input"
+              placeholder="例如 5:4 / 2.39:1"
+            />
+          </template>
+
+          <template v-else>
+            <label class="size-picker-label">输入具体像素值</label>
+            <div class="size-resolution-row">
+              <label>
+                <span>宽度</span>
+                <input v-model="customWidth" type="number" min="1" placeholder="1024" />
+              </label>
+              <span class="size-times">×</span>
+              <label>
+                <span>高度</span>
+                <input v-model="customHeight" type="number" min="1" placeholder="1024" />
+              </label>
+            </div>
+            <p class="size-limit-note">最终尺寸会自动规整为合法值：16 的倍数，最大边长 3840px，宽高比不超过 3:1。</p>
+          </template>
+        </div>
+
+        <div class="size-preview">
+          <span>将使用</span>
+          <strong>{{ previewSize || '尺寸无效' }}</strong>
+        </div>
+
+        <div class="size-picker-actions">
+          <button class="ghost-button" type="button" @click="sizePickerOpen = false">取消</button>
+          <button class="primary-button" type="button" :disabled="!previewSize" @click="applySize">确定</button>
+        </div>
+      </section>
     </div>
   </main>
 </template>

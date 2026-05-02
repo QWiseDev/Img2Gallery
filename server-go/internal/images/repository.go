@@ -2,6 +2,8 @@ package images
 
 import (
 	"database/sql"
+	"regexp"
+	"strconv"
 
 	"github.com/QWiseDev/Img2Gallery/server-go/internal/config"
 	"github.com/QWiseDev/Img2Gallery/server-go/internal/timeutil"
@@ -20,12 +22,21 @@ type Provider struct {
 	APIKey       string
 }
 
+type GenerationParams struct {
+	Size              string `json:"size"`
+	Quality           string `json:"quality"`
+	OutputFormat      string `json:"output_format"`
+	OutputCompression *int   `json:"output_compression"`
+	Moderation        string `json:"moderation"`
+}
+
 func NewRepository(database *sql.DB, cfg config.Config) *Repository {
 	return &Repository{db: database, cfg: cfg}
 }
 
-func (r *Repository) AddImage(userID int, prompt, status, requestIP, taskType, sourcePath string) (int64, error) {
+func (r *Repository) AddImage(userID int, prompt, status, requestIP, taskType, sourcePath string, params GenerationParams) (int64, error) {
 	now := timeutil.LocalTimestamp(r.cfg.AppTimezone)
+	params = NormalizeParams(params)
 	res, err := r.db.Exec(`
 		INSERT INTO images (user_id, prompt, task_type, source_image_path, status, request_ip, queued_at, created_at)
 		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
@@ -33,8 +44,74 @@ func (r *Repository) AddImage(userID int, prompt, status, requestIP, taskType, s
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if err := r.saveParams(id, params); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
+
+func (r *Repository) saveParams(imageID int64, params GenerationParams) error {
+	_, err := r.db.Exec(`
+		INSERT INTO image_params (image_id, size, quality, output_format, output_compression, moderation)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, imageID, params.Size, params.Quality, params.OutputFormat, params.OutputCompression, params.Moderation)
+	return err
+}
+
+func NormalizeParams(params GenerationParams) GenerationParams {
+	if !validSize(params.Size) {
+		params.Size = "auto"
+	}
+	if params.Quality != "low" && params.Quality != "medium" && params.Quality != "high" {
+		params.Quality = "auto"
+	}
+	if params.OutputFormat != "jpeg" && params.OutputFormat != "webp" {
+		params.OutputFormat = "png"
+	}
+	if params.OutputFormat == "png" {
+		params.OutputCompression = nil
+	} else if params.OutputCompression != nil {
+		value := *params.OutputCompression
+		if value < 0 {
+			value = 0
+		}
+		if value > 100 {
+			value = 100
+		}
+		params.OutputCompression = &value
+	}
+	if params.Moderation != "low" {
+		params.Moderation = "auto"
+	}
+	return params
+}
+
+func validSize(size string) bool {
+	if size == "auto" {
+		return true
+	}
+	match := sizePattern.FindStringSubmatch(size)
+	if match == nil {
+		return false
+	}
+	width, _ := strconv.Atoi(match[1])
+	height, _ := strconv.Atoi(match[2])
+	if width <= 0 || height <= 0 || width%16 != 0 || height%16 != 0 {
+		return false
+	}
+	if width > 3840 || height > 3840 {
+		return false
+	}
+	ratio := float64(max(width, height)) / float64(min(width, height))
+	pixels := width * height
+	return ratio <= 3 && pixels >= 655360 && pixels <= 8294400
+}
+
+var sizePattern = regexp.MustCompile(`^(\d+)x(\d+)$`)
 
 func (r *Repository) MarkRunning(imageID int, provider Provider) error {
 	_, err := r.db.Exec(`

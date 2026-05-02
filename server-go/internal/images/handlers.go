@@ -27,7 +27,8 @@ type Handlers struct {
 }
 
 type createPayload struct {
-	Prompt string `json:"prompt"`
+	Prompt string           `json:"prompt"`
+	Params GenerationParams `json:"params"`
 }
 
 func NewHandlers(repo *Repository, authHandlers *auth.Handlers, cfg config.Config, q *Queue) *Handlers {
@@ -69,11 +70,15 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var payload createPayload
-	if !httpx.DecodeJSON(r, &payload) || len(strings.TrimSpace(payload.Prompt)) < 2 {
+	if !httpx.DecodeJSON(r, &payload) {
+		httpx.Error(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	if len(strings.TrimSpace(payload.Prompt)) < 2 {
 		httpx.Error(w, http.StatusBadRequest, "提示词至少需要 2 个字符")
 		return
 	}
-	id, err := h.repo.AddImage(user.ID, strings.TrimSpace(payload.Prompt), "queued", httpx.ClientIP(r), "generate", "")
+	id, err := h.repo.AddImage(user.ID, strings.TrimSpace(payload.Prompt), "queued", httpx.ClientIP(r), "generate", "", payload.Params)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "图片记录创建失败")
 		return
@@ -86,12 +91,12 @@ func (h *Handlers) Edit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	prompt, sourcePath, err := h.parseEditRequest(r)
+	prompt, sourcePath, params, err := h.parseEditRequest(r)
 	if err != nil {
 		httpx.Error(w, statusForEditError(err), err.Error())
 		return
 	}
-	id, err := h.repo.AddImage(user.ID, prompt, "queued", httpx.ClientIP(r), "edit", sourcePath)
+	id, err := h.repo.AddImage(user.ID, prompt, "queued", httpx.ClientIP(r), "edit", sourcePath, params)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "图片编辑记录创建失败")
 		return
@@ -152,21 +157,35 @@ func (h *Handlers) toggleRelation(w http.ResponseWriter, r *http.Request, table 
 	httpx.JSON(w, http.StatusOK, image)
 }
 
-func (h *Handlers) parseEditRequest(r *http.Request) (string, string, error) {
+func (h *Handlers) parseEditRequest(r *http.Request) (string, string, GenerationParams, error) {
 	if err := r.ParseMultipartForm(maxSourceImageBytes + 1024); err != nil {
-		return "", "", editErr("请求格式错误")
+		return "", "", GenerationParams{}, editErr("请求格式错误")
 	}
 	prompt := strings.TrimSpace(r.FormValue("prompt"))
 	if len(prompt) < 2 {
-		return "", "", editErr("提示词至少需要 2 个字符")
+		return "", "", GenerationParams{}, editErr("提示词至少需要 2 个字符")
 	}
 	file, header, err := r.FormFile("image")
 	if err != nil {
-		return "", "", editErr("上传图片不能为空")
+		return "", "", GenerationParams{}, editErr("上传图片不能为空")
 	}
 	defer file.Close()
 	source, err := h.saveSourceImage(file, header.Filename, header.Header.Get("Content-Type"))
-	return prompt, source, err
+	return prompt, source, paramsFromForm(r), err
+}
+
+func paramsFromForm(r *http.Request) GenerationParams {
+	var params GenerationParams
+	params.Size = r.FormValue("size")
+	params.Quality = r.FormValue("quality")
+	params.OutputFormat = r.FormValue("output_format")
+	params.Moderation = r.FormValue("moderation")
+	if value := strings.TrimSpace(r.FormValue("output_compression")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			params.OutputCompression = &parsed
+		}
+	}
+	return params
 }
 
 func (h *Handlers) saveSourceImage(file io.Reader, name, contentType string) (string, error) {

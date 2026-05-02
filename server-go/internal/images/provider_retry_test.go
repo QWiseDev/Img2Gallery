@@ -1,6 +1,7 @@
 package images
 
 import (
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/QWiseDev/Img2Gallery/server-go/internal/config"
 )
 
 func TestProviderDoRetriesRetryableStatus(t *testing.T) {
@@ -90,7 +93,7 @@ func TestRequestImageRetriesEmptyData(t *testing.T) {
 	})}}
 	req, _ := http.NewRequest(http.MethodPost, "https://example.test/v1/images/generations", strings.NewReader(`{"prompt":"test"}`))
 
-	imageBytes, suffix, err := client.requestImage(req, "生图接口")
+	imageBytes, suffix, err := client.requestImage(req, "生图接口", "png")
 
 	if err != nil {
 		t.Fatalf("requestImage returned error: %v", err)
@@ -119,6 +122,48 @@ func TestProviderDoDoesNotRetryBadRequest(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("expected 1 call, got %d", calls)
+	}
+}
+
+func TestGenerateAndStoreSendsRequestParams(t *testing.T) {
+	var payload map[string]any
+	client := &ProviderClient{
+		cfg: config.Config{ImageStorageDir: t.TempDir()},
+		client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode request payload: %v", err)
+			}
+			return response(http.StatusOK, `{"data":[{"b64_json":"aW1hZ2U="}]}`), nil
+		})},
+	}
+	compression := 82
+
+	path, err := client.GenerateAndStore("test", GenerationParams{
+		Size:              "1536x1024",
+		Quality:           "high",
+		OutputFormat:      "webp",
+		OutputCompression: &compression,
+		Moderation:        "low",
+	}, Provider{Name: "test", ProviderType: "openai_compatible", Model: "gpt-image-2", APIBase: "https://example.test", APIKey: "key"})
+
+	if err != nil {
+		t.Fatalf("GenerateAndStore returned error: %v", err)
+	}
+	if !strings.HasSuffix(path, ".webp") {
+		t.Fatalf("expected webp suffix, got %s", path)
+	}
+	for key, expected := range map[string]any{
+		"model":              "gpt-image-2",
+		"prompt":             "test",
+		"size":               "1536x1024",
+		"quality":            "high",
+		"output_format":      "webp",
+		"output_compression": float64(82),
+		"moderation":         "low",
+	} {
+		if payload[key] != expected {
+			t.Fatalf("payload[%s] = %#v, want %#v; payload=%#v", key, payload[key], expected, payload)
+		}
 	}
 }
 

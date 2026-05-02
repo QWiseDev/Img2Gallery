@@ -33,11 +33,20 @@ export const api = {
     ),
   myImages: (offset = 0, limit = 12) =>
     request(`/api/images/mine?offset=${encodeURIComponent(offset)}&limit=${encodeURIComponent(limit)}`),
-  createImage: (prompt) => request('/api/images', { method: 'POST', body: JSON.stringify({ prompt }) }),
-  editImage: (prompt, image) => {
+  createImage: (prompt, params) => request('/api/images', { method: 'POST', body: JSON.stringify({ prompt, params }) }),
+  editImage: (prompt, image, params) => {
     const form = new FormData()
     form.append('prompt', prompt)
     form.append('image', image)
+    if (params) {
+      form.append('size', params.size || 'auto')
+      form.append('quality', params.quality || 'auto')
+      form.append('output_format', params.output_format || 'png')
+      form.append('moderation', params.moderation || 'auto')
+      if (params.output_compression !== null && params.output_compression !== undefined) {
+        form.append('output_compression', String(params.output_compression))
+      }
+    }
     return request('/api/images/edit', { method: 'POST', body: form })
   },
   jobEventsUrl: (id) => `${API_BASE}/api/images/${id}/events`,

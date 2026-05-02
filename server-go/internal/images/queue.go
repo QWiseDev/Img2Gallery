@@ -115,13 +115,14 @@ func (q *Queue) runJob(image map[string]any, provider Provider) (string, error) 
 	done := make(chan result, 1)
 	go func() {
 		prompt, _ := image["prompt"].(string)
+		params := paramsFromImage(image)
 		if image["task_type"] == "edit" {
 			source, _ := image["source_image_path"].(string)
-			path, err := q.provider.EditAndStore(prompt, source, provider)
+			path, err := q.provider.EditAndStore(prompt, source, params, provider)
 			done <- result{path: path, err: err}
 			return
 		}
-		path, err := q.provider.GenerateAndStore(prompt, provider)
+		path, err := q.provider.GenerateAndStore(prompt, params, provider)
 		done <- result{path: path, err: err}
 	}()
 	select {
@@ -130,6 +131,25 @@ func (q *Queue) runJob(image map[string]any, provider Provider) (string, error) 
 	case res := <-done:
 		return res.path, res.err
 	}
+}
+
+func paramsFromImage(image map[string]any) GenerationParams {
+	raw, _ := image["params"].(map[string]any)
+	var params GenerationParams
+	if raw == nil {
+		return NormalizeParams(params)
+	}
+	params.Size, _ = raw["size"].(string)
+	params.Quality, _ = raw["quality"].(string)
+	params.OutputFormat, _ = raw["output_format"].(string)
+	params.Moderation, _ = raw["moderation"].(string)
+	if value, ok := raw["output_compression"].(int); ok {
+		params.OutputCompression = &value
+	} else if value, ok := raw["output_compression"].(float64); ok {
+		intValue := int(value)
+		params.OutputCompression = &intValue
+	}
+	return NormalizeParams(params)
 }
 
 func (q *Queue) runningCount() int {
