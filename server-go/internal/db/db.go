@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -10,6 +11,13 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+const CurrentSchemaVersion = 1
+const upgradeCommand = "go run ./cmd/db-upgrade"
+
+type sqlExecutor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
 
 func Open(cfg config.Config) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(cfg.DatabasePath), 0o755); err != nil {
@@ -27,13 +35,66 @@ func Open(cfg config.Config) (*sql.DB, error) {
 }
 
 func Init(database *sql.DB, cfg config.Config) error {
+	fresh, err := databaseIsEmpty(database)
+	if err != nil {
+		return err
+	}
 	if _, err := database.Exec(schemaSQL); err != nil {
 		return err
 	}
-	return seedDefaults(database, cfg)
+	if err := seedDefaults(database, cfg); err != nil {
+		return err
+	}
+	if fresh {
+		return setSchemaVersion(database)
+	}
+	return requireCurrentSchema(database)
 }
 
-func seedDefaults(database *sql.DB, cfg config.Config) error {
+func Upgrade(database *sql.DB, cfg config.Config) error {
+	tx, err := database.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(schemaSQL); err != nil {
+		return err
+	}
+	if err := backfillImageParams(tx); err != nil {
+		return err
+	}
+	if err := clearLoginSessions(tx); err != nil {
+		return err
+	}
+	if err := seedDefaults(tx, cfg); err != nil {
+		return err
+	}
+	if err := setSchemaVersion(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func backfillImageParams(database sqlExecutor) error {
+	_, err := database.Exec(`
+		INSERT INTO image_params (image_id, size, quality, output_format, output_compression, moderation)
+		SELECT images.id, 'auto', 'auto', 'png', NULL, 'auto'
+		FROM images
+		LEFT JOIN image_params ON image_params.image_id = images.id
+		WHERE image_params.image_id IS NULL
+	`)
+	return err
+}
+
+func clearLoginSessions(database sqlExecutor) error {
+	if _, err := database.Exec("DELETE FROM sessions"); err != nil {
+		return err
+	}
+	_, err := database.Exec("DELETE FROM admin_sessions")
+	return err
+}
+
+func seedDefaults(database sqlExecutor, cfg config.Config) error {
 	now := timeutil.LocalTimestamp(cfg.AppTimezone)
 	_, err := database.Exec(`
 		INSERT OR IGNORE INTO app_settings (key, value, updated_at)
@@ -49,6 +110,44 @@ func seedDefaults(database *sql.DB, cfg config.Config) error {
 		VALUES ('GPT Image 2', 'openai_compatible', 'gpt-image-2', '', '', 1, 1, ?, ?)
 	`, now, now)
 	return err
+}
+
+func setSchemaVersion(database sqlExecutor) error {
+	_, err := database.Exec(fmt.Sprintf("PRAGMA user_version = %d", CurrentSchemaVersion))
+	return err
+}
+
+func requireCurrentSchema(database *sql.DB) error {
+	var version int
+	if err := database.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	if version != CurrentSchemaVersion {
+		return fmt.Errorf("database schema upgrade required: run %s", upgradeCommand)
+	}
+	var missingParams int
+	if err := database.QueryRow(`
+		SELECT COUNT(*)
+		FROM images
+		LEFT JOIN image_params ON image_params.image_id = images.id
+		WHERE image_params.image_id IS NULL
+	`).Scan(&missingParams); err != nil {
+		return err
+	}
+	if missingParams > 0 {
+		return fmt.Errorf("database has %d images without params: run %s", missingParams, upgradeCommand)
+	}
+	return nil
+}
+
+func databaseIsEmpty(database *sql.DB) (bool, error) {
+	var count int
+	err := database.QueryRow(`
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+	`).Scan(&count)
+	return count == 0, err
 }
 
 const schemaSQL = `

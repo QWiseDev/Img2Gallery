@@ -153,30 +153,31 @@ func (r *Repository) NextQueuedJobs(limit int) ([]int, error) {
 	return ids, rows.Err()
 }
 
-func (r *Repository) QueueCounts() map[string]int {
+func (r *Repository) QueueCounts() QueueCounts {
 	var queued, running int
 	_ = r.db.QueryRow(`
 		SELECT COALESCE(SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0)
 		FROM images
 	`).Scan(&queued, &running)
-	return map[string]int{"queued": queued, "running": running}
+	return QueueCounts{Queued: queued, Running: running}
 }
 
-func (r *Repository) QueuePosition(imageID int) any {
+func (r *Repository) QueuePosition(imageID int) *int {
 	var status string
 	if err := r.db.QueryRow("SELECT status FROM images WHERE id = ?", imageID).Scan(&status); err != nil {
 		return nil
 	}
 	if status != "queued" {
-		return 0
+		value := 0
+		return &value
 	}
 	var position int
 	_ = r.db.QueryRow("SELECT COUNT(*) FROM images WHERE status = 'queued' AND id <= ?", imageID).Scan(&position)
-	return position
+	return &position
 }
 
-func (r *Repository) ListImages(viewerID int, sort string, limit, offset int) ([]map[string]any, error) {
+func (r *Repository) ListImages(viewerID int, sort string, limit, offset int) ([]Image, error) {
 	order := "images.created_at DESC"
 	if sort == "popular" {
 		order = "likes DESC, images.created_at DESC"
@@ -191,23 +192,31 @@ func (r *Repository) ListImages(viewerID int, sort string, limit, offset int) ([
 	return r.queryImages(baseImageSQL(where, order), args...)
 }
 
-func (r *Repository) ListUserImages(userID, limit, offset int) ([]map[string]any, error) {
+func (r *Repository) ListUserImages(userID, limit, offset int) ([]Image, error) {
 	sqlText := baseImageSQL("WHERE images.user_id = ?", "images.id DESC")
 	return r.queryImages(sqlText, userID, userID, userID, limit, offset)
 }
 
-func (r *Repository) GetImage(imageID, viewerID int) (map[string]any, bool, error) {
+func (r *Repository) GetImage(imageID, viewerID int) (Image, bool, error) {
 	rows, err := r.queryImages(baseImageSQL("WHERE images.id = ?", "images.id DESC"), viewerID, viewerID, imageID, 1, 0)
 	if err != nil {
-		return nil, false, err
+		return Image{}, false, err
 	}
 	if len(rows) == 0 {
-		return nil, false, nil
+		return Image{}, false, nil
 	}
 	return rows[0], true, nil
 }
 
-func (r *Repository) ToggleRelation(table string, imageID, userID int) (bool, error) {
+func (r *Repository) ToggleLike(imageID, userID int) (bool, error) {
+	return r.toggleRelation("image_likes", imageID, userID)
+}
+
+func (r *Repository) ToggleFavorite(imageID, userID int) (bool, error) {
+	return r.toggleRelation("image_favorites", imageID, userID)
+}
+
+func (r *Repository) toggleRelation(table string, imageID, userID int) (bool, error) {
 	var existing int
 	err := r.db.QueryRow("SELECT 1 FROM "+table+" WHERE image_id = ? AND user_id = ?", imageID, userID).Scan(&existing)
 	if err == nil {
@@ -244,13 +253,13 @@ func (r *Repository) GetConcurrency() int {
 	return int(value[0] - '0')
 }
 
-func (r *Repository) queryImages(query string, args ...any) ([]map[string]any, error) {
+func (r *Repository) queryImages(query string, args ...any) ([]Image, error) {
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var images []map[string]any
+	var images []Image
 	for rows.Next() {
 		image, err := scanImage(rows)
 		if err != nil {

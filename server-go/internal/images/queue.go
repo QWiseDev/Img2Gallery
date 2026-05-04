@@ -41,12 +41,12 @@ func (q *Queue) Events(ctx context.Context, imageID, viewerID int) <-chan string
 		for {
 			image, ok, _ := q.repo.GetImage(imageID, viewerID)
 			if !ok {
-				ch <- sse(map[string]any{"status": "missing", "position": nil, "queue": q.repo.QueueCounts()})
+				ch <- sse(QueueEvent{Status: "missing", Position: nil, Queue: q.repo.QueueCounts()})
 				return
 			}
-			delete(image, "source_image_path")
-			status, _ := image["status"].(string)
-			ch <- sse(map[string]any{"status": status, "position": q.repo.QueuePosition(imageID), "queue": q.repo.QueueCounts(), "image": image})
+			image.SourceImagePath = nil
+			status := image.Status
+			ch <- sse(QueueEvent{Status: status, Position: q.repo.QueuePosition(imageID), Queue: q.repo.QueueCounts(), Image: &image})
 			if status == "ready" || status == "failed" {
 				return
 			}
@@ -109,20 +109,22 @@ func (q *Queue) process(imageID int) {
 	_ = q.repo.MarkReady(imageID, path)
 }
 
-func (q *Queue) runJob(image map[string]any, provider Provider) (string, error) {
+func (q *Queue) runJob(image Image, provider Provider) (string, error) {
 	ctx, cancel := context.WithTimeout(q.ctx, jobTimeout)
 	defer cancel()
 	done := make(chan result, 1)
 	go func() {
-		prompt, _ := image["prompt"].(string)
-		params := paramsFromImage(image)
-		if image["task_type"] == "edit" {
-			source, _ := image["source_image_path"].(string)
-			path, err := q.provider.EditAndStore(prompt, source, params, provider)
+		params := NormalizeParams(image.Params)
+		if image.TaskType == "edit" {
+			source := ""
+			if image.SourceImagePath != nil {
+				source = *image.SourceImagePath
+			}
+			path, err := q.provider.EditAndStore(image.Prompt, source, params, provider)
 			done <- result{path: path, err: err}
 			return
 		}
-		path, err := q.provider.GenerateAndStore(prompt, params, provider)
+		path, err := q.provider.GenerateAndStore(image.Prompt, params, provider)
 		done <- result{path: path, err: err}
 	}()
 	select {
@@ -131,25 +133,6 @@ func (q *Queue) runJob(image map[string]any, provider Provider) (string, error) 
 	case res := <-done:
 		return res.path, res.err
 	}
-}
-
-func paramsFromImage(image map[string]any) GenerationParams {
-	raw, _ := image["params"].(map[string]any)
-	var params GenerationParams
-	if raw == nil {
-		return NormalizeParams(params)
-	}
-	params.Size, _ = raw["size"].(string)
-	params.Quality, _ = raw["quality"].(string)
-	params.OutputFormat, _ = raw["output_format"].(string)
-	params.Moderation, _ = raw["moderation"].(string)
-	if value, ok := raw["output_compression"].(int); ok {
-		params.OutputCompression = &value
-	} else if value, ok := raw["output_compression"].(float64); ok {
-		intValue := int(value)
-		params.OutputCompression = &intValue
-	}
-	return NormalizeParams(params)
 }
 
 func (q *Queue) runningCount() int {
@@ -179,7 +162,7 @@ type result struct {
 	err  error
 }
 
-func sse(payload map[string]any) string {
+func sse(payload QueueEvent) string {
 	raw, _ := json.Marshal(payload)
 	return "data: " + string(raw) + "\n\n"
 }

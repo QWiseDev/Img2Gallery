@@ -197,11 +197,11 @@ func (h *Handlers) require(w http.ResponseWriter, r *http.Request) bool {
 	return ok
 }
 
-func (h *Handlers) requireAdmin(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
+func (h *Handlers) requireAdmin(w http.ResponseWriter, r *http.Request) (AdminIdentity, bool) {
 	admin, err := h.service.Require(r)
 	if err != nil {
 		writeAdminError(w, err)
-		return nil, false
+		return AdminIdentity{}, false
 	}
 	return admin, true
 }

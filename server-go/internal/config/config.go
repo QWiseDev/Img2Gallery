@@ -13,7 +13,6 @@ type Config struct {
 	ImageStorageDir string
 	ClientOrigin    string
 	AppTimezone     string
-	ProjectRoot     string
 	FrontendDist    string
 }
 
@@ -27,7 +26,6 @@ func Load() Config {
 		ImageStorageDir: env("IMAGE_STORAGE_DIR", "server/storage/images"),
 		ClientOrigin:    env("CLIENT_ORIGIN", "http://localhost:5173"),
 		AppTimezone:     env("APP_TIMEZONE", "Asia/Shanghai"),
-		ProjectRoot:     root,
 	}
 	cfg.DatabasePath = resolvePath(root, cfg.DatabasePath)
 	cfg.ImageStorageDir = resolvePath(root, cfg.ImageStorageDir)

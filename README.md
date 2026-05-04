@@ -98,6 +98,24 @@ cd server-go
 DATABASE_PATH=../server/app.db IMAGE_STORAGE_DIR=../server/storage/images ADDR=127.0.0.1:8000 go run ./cmd/server
 ```
 
+### 数据库升级
+
+后端不在运行时兼容旧表结构。拉取包含数据库结构变化的新版本后，先执行升级命令：
+
+```bash
+cd server-go
+go run ./cmd/db-upgrade
+```
+
+如需指定数据库路径：
+
+```bash
+cd server-go
+DATABASE_PATH=../server/app.db go run ./cmd/db-upgrade
+```
+
+升级会补齐当前版本必需表和数据行，并清空用户/管理员登录 session，升级后需要重新登录。
+
 ## 管理后台
 
 访问：

@@ -2,7 +2,9 @@ package app
 
 import (
 	"database/sql"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -43,10 +45,9 @@ func New(cfg config.Config) (http.Handler, *sql.DB, error) {
 }
 
 func withCORS(next http.Handler, cfg config.Config) http.Handler {
-	allowed := map[string]bool{cfg.ClientOrigin: true, "http://127.0.0.1:5173": true}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if allowed[origin] || originAllowedForSelf(origin, cfg) {
+		if originAllowed(origin, cfg) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -61,16 +62,83 @@ func withCORS(next http.Handler, cfg config.Config) http.Handler {
 	})
 }
 
-func originAllowedForSelf(origin string, cfg config.Config) bool {
-	return origin != "" && strings.Contains(origin, hostFromAddr(cfg.Addr))
+func originAllowed(origin string, cfg config.Config) bool {
+	if origin == "" {
+		return false
+	}
+	if origin == cfg.ClientOrigin || origin == "http://127.0.0.1:5173" {
+		return true
+	}
+	return originAllowedForSelf(origin, cfg)
 }
 
-func hostFromAddr(addr string) string {
-	addr = strings.Replace(addr, "0.0.0.0", "localhost", 1)
-	if strings.HasPrefix(addr, ":") {
-		return "localhost" + addr
+func originAllowedForSelf(origin string, cfg config.Config) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
 	}
-	return strings.Split(addr, ":")[0]
+	listenerHost, listenerPort := listenerHostPort(cfg.Addr)
+	if listenerPort != "" && originPort(parsed) != listenerPort {
+		return false
+	}
+	if isWildcardHost(listenerHost) {
+		return isLoopbackHost(parsed.Hostname())
+	}
+	return sameHost(listenerHost, parsed.Hostname())
+}
+
+func listenerHostPort(addr string) (string, string) {
+	host, port, err := net.SplitHostPort(addr)
+	if err == nil {
+		return normalizeHost(host), port
+	}
+	if strings.HasPrefix(addr, ":") {
+		return "", strings.TrimPrefix(addr, ":")
+	}
+	return normalizeHost(addr), ""
+}
+
+func normalizeHost(host string) string {
+	host = strings.Trim(host, "[]")
+	if isWildcardHost(host) {
+		return ""
+	}
+	return host
+}
+
+func originPort(parsed *url.URL) string {
+	if parsed.Port() != "" {
+		return parsed.Port()
+	}
+	switch parsed.Scheme {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
+}
+
+func isWildcardHost(host string) bool {
+	return host == "" || host == "0.0.0.0" || host == "::"
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func sameHost(left, right string) bool {
+	if strings.EqualFold(left, right) {
+		return true
+	}
+	leftIP := net.ParseIP(left)
+	rightIP := net.ParseIP(right)
+	return leftIP != nil && rightIP != nil && leftIP.Equal(rightIP)
 }
 
 func EnsureStorage(cfg config.Config) error {

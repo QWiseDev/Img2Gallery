@@ -115,8 +115,7 @@ func (h *Handlers) Events(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, "图片不存在")
 		return
 	}
-	author := image["author"].(map[string]any)
-	if author["id"] != user.ID {
+	if image.Author.ID != user.ID {
 		httpx.Error(w, http.StatusForbidden, "无权查看该任务")
 		return
 	}
@@ -131,14 +130,14 @@ func (h *Handlers) Events(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) Like(w http.ResponseWriter, r *http.Request) {
-	h.toggleRelation(w, r, "image_likes")
+	h.toggleRelation(w, r, h.repo.ToggleLike)
 }
 
 func (h *Handlers) Favorite(w http.ResponseWriter, r *http.Request) {
-	h.toggleRelation(w, r, "image_favorites")
+	h.toggleRelation(w, r, h.repo.ToggleFavorite)
 }
 
-func (h *Handlers) toggleRelation(w http.ResponseWriter, r *http.Request, table string) {
+func (h *Handlers) toggleRelation(w http.ResponseWriter, r *http.Request, toggle func(int, int) (bool, error)) {
 	user, ok := h.requireUser(w, r)
 	if !ok {
 		return
@@ -148,7 +147,7 @@ func (h *Handlers) toggleRelation(w http.ResponseWriter, r *http.Request, table 
 		httpx.Error(w, http.StatusNotFound, "图片不存在")
 		return
 	}
-	_, err := h.repo.ToggleRelation(table, imageID, user.ID)
+	_, err := toggle(imageID, user.ID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "服务器错误")
 		return
@@ -234,13 +233,13 @@ func (h *Handlers) optionalUserID(r *http.Request) int {
 	return user.ID
 }
 
-func writeImages(w http.ResponseWriter, images []map[string]any, err error) {
+func writeImages(w http.ResponseWriter, images []Image, err error) {
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "服务器错误")
 		return
 	}
 	if images == nil {
-		images = []map[string]any{}
+		images = []Image{}
 	}
 	httpx.JSON(w, http.StatusOK, images)
 }

@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   Bookmark,
   Check,
-  ChevronDown,
   Copy,
   EyeOff,
   ExternalLink,
@@ -23,7 +22,7 @@ import {
 import { api, mediaUrl } from '../services/api'
 
 const GALLERY_PAGE_SIZE = 24
-const RECORD_PAGE_SIZE = 8
+const MY_IMAGES_PAGE_SIZE = 8
 const user = ref(null)
 const adminAccess = ref(false)
 const authMode = ref('login')
@@ -56,10 +55,8 @@ const loading = ref(true)
 const galleryLoadingMore = ref(false)
 const galleryHasMore = ref(true)
 const galleryOffset = ref(0)
-const recordsLoaded = ref(false)
-const recordsLoading = ref(false)
-const recordsHasMore = ref(true)
-const recordsOffset = ref(0)
+const myImagesLoaded = ref(false)
+const myImagesLoading = ref(false)
 const authLoading = ref(false)
 const generating = ref(false)
 const message = ref('')
@@ -164,28 +161,20 @@ async function loadImages(reset = false) {
   }
 }
 
-async function loadMyImages(reset = false) {
+async function loadMyImages() {
   if (!user.value) {
     myImages.value = []
     return
   }
-  if (!reset && (recordsLoading.value || !recordsHasMore.value)) return
-  if (reset) {
-    recordsOffset.value = 0
-    recordsHasMore.value = true
-  }
-  recordsLoading.value = true
+  if (myImagesLoading.value) return
+  myImagesLoading.value = true
   try {
-    const offset = reset ? 0 : recordsOffset.value
-    const rows = await api.myImages(offset, RECORD_PAGE_SIZE)
-    myImages.value = reset ? rows : mergeImages(myImages.value, rows)
-    recordsOffset.value = offset + rows.length
-    recordsHasMore.value = rows.length === RECORD_PAGE_SIZE
-    recordsLoaded.value = true
+    myImages.value = await api.myImages(0, MY_IMAGES_PAGE_SIZE)
+    myImagesLoaded.value = true
   } catch (error) {
     message.value = error.message
   } finally {
-    recordsLoading.value = false
+    myImagesLoading.value = false
   }
 }
 
@@ -203,11 +192,11 @@ async function submitAuth() {
     user.value = authMode.value === 'login' ? await api.login(payload) : await api.register(payload)
     authForm.value = { username: '', password: '', display_name: '', captcha_code: '' }
     authModalOpen.value = false
-    recordsLoaded.value = false
+    myImagesLoaded.value = false
     myImages.value = []
     await refreshAdminAccess()
     await loadImages(true)
-    if (activeTab.value === 'records') await loadMyImages(true)
+    if (activeTab.value === 'create') await loadMyImages()
   } catch (error) {
     message.value = error.message
     authForm.value.captcha_code = ''
@@ -226,9 +215,7 @@ async function logout() {
   sort.value = 'latest'
   queueState.value = null
   myImages.value = []
-  recordsLoaded.value = false
-  recordsOffset.value = 0
-  recordsHasMore.value = true
+  myImagesLoaded.value = false
   await loadImages(true)
 }
 
@@ -433,7 +420,7 @@ function watchJob(id) {
       generating.value = false
       closeEvents()
       await loadImages(true)
-      if (recordsLoaded.value || activeTab.value === 'create') await loadMyImages(true)
+      if (myImagesLoaded.value || activeTab.value === 'create') await loadMyImages()
       if (payload.status === 'ready') message.value = `${payload.image?.task_type === 'edit' ? '编辑' : '生成'}完成，已上传到画廊`
     }
   }
@@ -466,8 +453,7 @@ function handleGalleryScroll() {
 async function selectTab(tab) {
   activeTab.value = tab
   message.value = ''
-  if (tab === 'create' && user.value && !recordsLoaded.value) await loadMyImages(true)
-  if (tab === 'records' && user.value && !recordsLoaded.value) await loadMyImages(true)
+  if (tab === 'create' && user.value && !myImagesLoaded.value) await loadMyImages()
 }
 
 function openCreateEntry() {
@@ -716,7 +702,7 @@ function taskLabel(taskType) {
         <span>队列 {{ queueState.queue.queued }} · 生成中 {{ queueState.queue.running }}</span>
       </div>
 
-      <div v-if="recordsLoading && myImages.length === 0" class="playground-empty">
+      <div v-if="myImagesLoading && myImages.length === 0" class="playground-empty">
         <RefreshCw class="spin" :size="28" />
         正在同步你的生成记录
       </div>
@@ -841,59 +827,6 @@ function taskLabel(taskType) {
         </div>
       </div>
 
-    </section>
-
-    <section v-if="activeTab === 'records'" class="records-section">
-      <template v-if="!user">
-        <div class="empty-state">
-          <UserRound :size="26" />
-          登录后查看你的生成记录
-        </div>
-        <button class="primary-button wide" type="button" @click="openAuthModal('login')">
-          <LogIn :size="18" />
-          登录账号
-        </button>
-      </template>
-      <template v-else>
-        <div class="section-heading">
-          <h2>我的生成记录</h2>
-          <div class="records-actions">
-            <button class="ghost-button compact" :disabled="recordsLoading" @click="loadMyImages(true)">刷新</button>
-            <button class="ghost-button compact collapse-toggle active" @click="selectTab('gallery')">
-              <ChevronDown :size="17" />
-              返回画廊
-            </button>
-          </div>
-        </div>
-        <div v-if="recordsLoading && myImages.length === 0" class="empty-state small-empty">正在加载生成记录</div>
-        <div v-else-if="recordsLoaded && myImages.length === 0" class="empty-state small-empty">暂无生成记录</div>
-        <div v-else class="records-list">
-          <article v-for="item in myImages" :key="item.id" class="record-row" :class="{ 'has-source': item.source_image_url }">
-            <button v-if="item.source_image_url" class="record-source" type="button" @click="openPreview(item)">
-              <img :src="mediaUrl(item.source_image_url)" alt="编辑原图" />
-            </button>
-            <div>
-              <strong>#{{ item.id }} · {{ taskLabel(item.task_type) }} · {{ statusLabel(item.status) }}{{ item.is_hidden ? ' · 已隐藏' : '' }}</strong>
-              <p>{{ item.prompt }}</p>
-              <span>{{ item.completed_at || item.created_at }}</span>
-              <em v-if="item.error">{{ item.error }}</em>
-            </div>
-            <button
-              type="button"
-              class="tiny-button"
-              :class="{ disabled: item.status !== 'ready' }"
-              :disabled="item.status !== 'ready'"
-              @click="openPreview(item)"
-            >
-              打开图片
-            </button>
-          </article>
-          <button v-if="recordsHasMore" class="ghost-button records-more" :disabled="recordsLoading" @click="loadMyImages(false)">
-            <RefreshCw v-if="recordsLoading" class="spin" :size="17" />
-            {{ recordsLoading ? '加载中' : '加载更多记录' }}
-          </button>
-        </div>
-      </template>
     </section>
 
     <section v-if="activeTab === 'gallery'" id="gallery" class="gallery-section">

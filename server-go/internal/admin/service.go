@@ -46,34 +46,32 @@ func (s *Service) Logout(token string) error {
 	return err
 }
 
-func (s *Service) Require(r *http.Request) (map[string]any, error) {
+func (s *Service) Require(r *http.Request) (AdminIdentity, error) {
 	if adminUser, ok := s.adminFromUser(r); ok {
 		return adminUser, nil
 	}
 	cookie, _ := r.Cookie(CookieName)
 	if cookie == nil {
-		return nil, ErrAdminLoginRequired
+		return AdminIdentity{}, ErrAdminLoginRequired
 	}
 	var stored string
 	err := s.db.QueryRow("SELECT token FROM admin_sessions WHERE token = ? AND expires_at > ?", cookie.Value, utcISO(time.Now().UTC())).Scan(&stored)
 	if err != nil {
-		return nil, ErrAdminSessionExpired
+		return AdminIdentity{}, ErrAdminSessionExpired
 	}
-	return map[string]any{"role": "admin", "source": "password"}, nil
+	return AdminIdentity{Role: "admin", Source: "password"}, nil
 }
 
-func (s *Service) adminFromUser(r *http.Request) (map[string]any, bool) {
+func (s *Service) adminFromUser(r *http.Request) (AdminIdentity, bool) {
 	cookie, _ := r.Cookie(auth.SessionCookie)
 	if cookie == nil {
-		return nil, false
+		return AdminIdentity{}, false
 	}
 	user, err := s.auth.CurrentUser(cookie.Value)
 	if err != nil || !user.IsAdmin {
-		return nil, false
+		return AdminIdentity{}, false
 	}
-	return map[string]any{
-		"role": "admin", "source": "user", "user_id": user.ID, "username": user.Username,
-	}, true
+	return AdminIdentity{Role: "admin", Source: "user", UserID: &user.ID, Username: user.Username}, true
 }
 
 func token(size int) string {

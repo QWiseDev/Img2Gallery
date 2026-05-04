@@ -30,7 +30,7 @@ func NewRepository(database *sql.DB, cfg config.Config) *Repository {
 	return &Repository{db: database, cfg: cfg}
 }
 
-func (r *Repository) Dashboard() (map[string]any, error) {
+func (r *Repository) Dashboard() (Dashboard, error) {
 	var total, queued, running, ready, failed int
 	err := r.db.QueryRow(`
 		SELECT COUNT(*),
@@ -41,19 +41,25 @@ func (r *Repository) Dashboard() (map[string]any, error) {
 		FROM images
 	`).Scan(&total, &queued, &running, &ready, &failed)
 	if err != nil {
-		return nil, err
+		return Dashboard{}, err
 	}
 	users, _ := r.countUsers()
 	providers, _ := r.ListProviders()
-	return map[string]any{
-		"users":       users,
-		"images":      map[string]int{"total": total, "queued": queued, "running": running, "ready": ready, "failed": failed},
-		"concurrency": r.GetConcurrency(),
-		"providers":   providers,
+	return Dashboard{
+		Users: users,
+		Images: DashboardImages{
+			Total:   total,
+			Queued:  queued,
+			Running: running,
+			Ready:   ready,
+			Failed:  failed,
+		},
+		Concurrency: r.GetConcurrency(),
+		Providers:   providers,
 	}, nil
 }
 
-func (r *Repository) UsersOverview() ([]map[string]any, error) {
+func (r *Repository) UsersOverview() ([]UserOverview, error) {
 	rows, err := r.db.Query(`
 		SELECT users.id, users.username, users.display_name, users.avatar_color, users.is_admin,
 			users.last_login_ip, users.last_login_at, users.created_at, COUNT(images.id),
@@ -67,7 +73,7 @@ func (r *Repository) UsersOverview() ([]map[string]any, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var users []map[string]any
+	var users []UserOverview
 	for rows.Next() {
 		item, err := scanUserOverview(rows)
 		if err != nil {
@@ -78,27 +84,27 @@ func (r *Repository) UsersOverview() ([]map[string]any, error) {
 	return users, rows.Err()
 }
 
-func (r *Repository) SetUserAdmin(userID int, isAdmin bool) (map[string]any, bool, error) {
+func (r *Repository) SetUserAdmin(userID int, isAdmin bool) (UserAdminResult, bool, error) {
 	_, err := r.db.Exec("UPDATE users SET is_admin = ? WHERE id = ?", boolInt(isAdmin), userID)
 	if err != nil {
-		return nil, false, err
+		return UserAdminResult{}, false, err
 	}
 	row := r.db.QueryRow("SELECT id, username, display_name, avatar_color, is_admin FROM users WHERE id = ?", userID)
 	var id, adminFlag int
 	var username, displayName, avatarColor string
 	if err := row.Scan(&id, &username, &displayName, &avatarColor, &adminFlag); err != nil {
-		return nil, false, nil
+		return UserAdminResult{}, false, nil
 	}
-	return map[string]any{"id": id, "username": username, "display_name": displayName, "avatar_color": avatarColor, "is_admin": adminFlag == 1}, true, nil
+	return UserAdminResult{ID: id, Username: username, DisplayName: displayName, AvatarColor: avatarColor, IsAdmin: adminFlag == 1}, true, nil
 }
 
-func (r *Repository) GenerationRecords(limit int) ([]map[string]any, error) {
+func (r *Repository) GenerationRecords(limit int) ([]GenerationRecord, error) {
 	rows, err := r.db.Query(generationRecordsSQL, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var records []map[string]any
+	var records []GenerationRecord
 	for rows.Next() {
 		item, err := scanGenerationRecord(rows)
 		if err != nil {
@@ -109,40 +115,40 @@ func (r *Repository) GenerationRecords(limit int) ([]map[string]any, error) {
 	return records, rows.Err()
 }
 
-func (r *Repository) SetGenerationHidden(imageID int, hidden bool) (map[string]any, bool, error) {
+func (r *Repository) SetGenerationHidden(imageID int, hidden bool) (GenerationHiddenResult, bool, error) {
 	_, err := r.db.Exec("UPDATE images SET is_hidden = ? WHERE id = ?", boolInt(hidden), imageID)
 	if err != nil {
-		return nil, false, err
+		return GenerationHiddenResult{}, false, err
 	}
 	var id, isHidden int
 	err = r.db.QueryRow("SELECT id, is_hidden FROM images WHERE id = ?", imageID).Scan(&id, &isHidden)
 	if err != nil {
-		return nil, false, nil
+		return GenerationHiddenResult{}, false, nil
 	}
-	return map[string]any{"id": id, "is_hidden": isHidden == 1}, true, nil
+	return GenerationHiddenResult{ID: id, IsHidden: isHidden == 1}, true, nil
 }
 
-func (r *Repository) DeleteGeneration(imageID int) (map[string]int, bool, error) {
+func (r *Repository) DeleteGeneration(imageID int) (DeleteGenerationResult, bool, error) {
 	var imagePath, sourceImagePath sql.NullString
 	err := r.db.QueryRow("SELECT image_path, source_image_path FROM images WHERE id = ?", imageID).Scan(&imagePath, &sourceImagePath)
 	if err != nil {
-		return nil, false, nil
+		return DeleteGenerationResult{}, false, nil
 	}
 	if _, err := r.db.Exec("DELETE FROM images WHERE id = ?", imageID); err != nil {
-		return nil, false, err
+		return DeleteGenerationResult{}, false, err
 	}
 	r.deleteStorageFile(imagePath)
 	r.deleteStorageFile(sourceImagePath)
-	return map[string]int{"id": imageID}, true, nil
+	return DeleteGenerationResult{ID: imageID}, true, nil
 }
 
-func (r *Repository) ListProviders() ([]map[string]any, error) {
+func (r *Repository) ListProviders() ([]ProviderResponse, error) {
 	rows, err := r.db.Query("SELECT id, name, provider_type, model, api_base, api_key, enabled, is_default, updated_at FROM model_providers ORDER BY is_default DESC, id ASC")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var providers []map[string]any
+	var providers []ProviderResponse
 	for rows.Next() {
 		item, err := scanProvider(rows)
 		if err != nil {
@@ -153,13 +159,13 @@ func (r *Repository) ListProviders() ([]map[string]any, error) {
 	return providers, rows.Err()
 }
 
-func (r *Repository) UpsertProvider(payload ProviderPayload) (map[string]any, error) {
+func (r *Repository) UpsertProvider(payload ProviderPayload) (ProviderResponse, error) {
 	if payload.IsDefault {
 		_, _ = r.db.Exec("UPDATE model_providers SET is_default = 0")
 	}
 	providerID, err := r.saveProvider(payload)
 	if err != nil {
-		return nil, err
+		return ProviderResponse{}, err
 	}
 	row := r.db.QueryRow("SELECT id, name, provider_type, model, api_base, api_key, enabled, is_default, updated_at FROM model_providers WHERE id = ?", providerID)
 	return scanProvider(row)

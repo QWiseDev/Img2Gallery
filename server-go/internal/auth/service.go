@@ -46,7 +46,7 @@ func (s *Service) CreateUser(username, password, displayName string) (User, erro
 	normalized := strings.ToLower(strings.TrimSpace(username))
 	shown := strings.TrimSpace(displayName)
 	if shown == "" {
-		shown = username
+		shown = strings.TrimSpace(username)
 	}
 	hash, err := HashPassword(password, "")
 	if err != nil {
